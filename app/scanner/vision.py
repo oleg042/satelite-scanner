@@ -117,7 +117,7 @@ def validate_osm_bbox(
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=model,
-            max_tokens=256,
+            max_completion_tokens=4096,
             messages=[{
                 "role": "user",
                 "content": [
@@ -194,7 +194,7 @@ def detect_facility_boundary(
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=model,
-            max_tokens=512,
+            max_completion_tokens=8192,
             messages=[{
                 "role": "user",
                 "content": [
