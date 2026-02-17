@@ -8,6 +8,7 @@ Flow:
   5. DONE
 """
 
+import asyncio
 import logging
 import os
 import re
@@ -158,8 +159,9 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
             ai_start = time.monotonic()
 
             # Capture overview at OSM bbox for validation
-            ov_img, ov_grid = capture_area(
-                *osm_bbox, overview_zoom, cache=cache, delay=settings.tile_delay_s
+            ov_img, ov_grid = await asyncio.to_thread(
+                capture_area,
+                *osm_bbox, overview_zoom, cache, settings.tile_delay_s,
             )
 
             if ov_img:
@@ -174,11 +176,11 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
 
                 width_m, height_m = bbox_dimensions_m(*osm_bbox)
 
-                validation = validate_osm_bbox(
+                validation = await asyncio.to_thread(
+                    validate_osm_bbox,
                     abs_path, facility_name, lat, lng, width_m, height_m,
-                    api_key=config["api_key"],
-                    model=config["validation_model"],
-                    prompt_template=config["validation_prompt"],
+                    config["api_key"], config["validation_model"],
+                    config["validation_prompt"],
                 )
 
                 if validation:
@@ -213,8 +215,9 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
 
             # Capture wide overview
             wide_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.overview_radius_m)
-            ov_img, ov_grid = capture_area(
-                *wide_bbox, overview_zoom, cache=cache, delay=settings.tile_delay_s
+            ov_img, ov_grid = await asyncio.to_thread(
+                capture_area,
+                *wide_bbox, overview_zoom, cache, settings.tile_delay_s,
             )
 
             if ov_img and ov_grid:
@@ -229,11 +232,11 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
 
                 width_m, height_m = bbox_dimensions_m(*wide_bbox)
 
-                boundary = detect_facility_boundary(
+                boundary = await asyncio.to_thread(
+                    detect_facility_boundary,
                     abs_path, facility_name, lat, lng, width_m, height_m,
-                    api_key=config["api_key"],
-                    model=config["boundary_model"],
-                    prompt_template=config["boundary_prompt"],
+                    config["api_key"], config["boundary_model"],
+                    config["boundary_prompt"],
                 )
 
                 if boundary:
@@ -286,8 +289,9 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
         await db.commit()
 
         tile_start = time.monotonic()
-        detail_img, grid_info = capture_area(
-            *final_bbox, zoom, cache=cache, delay=settings.tile_delay_s
+        detail_img, grid_info = await asyncio.to_thread(
+            capture_area,
+            *final_bbox, zoom, cache, settings.tile_delay_s,
         )
 
         if detail_img and grid_info:

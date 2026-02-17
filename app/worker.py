@@ -27,20 +27,8 @@ async def worker_loop():
         logger.info("Processing scan %s (%s)...", scan_id, facility_name)
         try:
             async with async_session() as db:
-                # Run pipeline in thread for CPU-bound Pillow operations
-                await asyncio.to_thread(
-                    _run_sync_wrapper, scan_id, facility_name, lat, lng, db
-                )
+                await run_pipeline(scan_id, facility_name, lat, lng, db)
         except Exception:
             logger.exception("Worker error for scan %s", scan_id)
         finally:
             scan_queue.task_done()
-
-
-def _run_sync_wrapper(scan_id, facility_name, lat, lng, db):
-    """Sync wrapper to run async pipeline from thread."""
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(run_pipeline(scan_id, facility_name, lat, lng, db))
-    finally:
-        loop.close()
