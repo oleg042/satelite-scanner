@@ -789,18 +789,22 @@ async function geocodeAddress(str, facilityName = '') {
         const gData = await gRes.json();
         if (gData.results && gData.results.length > 0) {
           return gData.results.map(r => ({
-            lat: r.lat, lng: r.lng, display_name: r.display_name,
+            lat: r.lat, lng: r.lng, display_name: r.display_name, source: 'google',
           }));
         }
+        // Log why it didn't work (for debugging)
+        if (gData.error) console.warn('Google Maps geocode:', gData.error);
       }
-    } catch {}
+    } catch (e) {
+      console.warn('Google Maps geocode failed:', e);
+    }
   }
 
   // Step 2+3: Census + Nominatim in parallel
   const nominatimP = fetch(`/api/geocode/nominatim?address=${encodeURIComponent(str)}`)
     .then(r => r.ok ? r.json() : [])
     .then(data => (data || []).map(r => ({
-      lat: parseFloat(r.lat), lng: parseFloat(r.lon), display_name: r.display_name,
+      lat: parseFloat(r.lat), lng: parseFloat(r.lon), display_name: r.display_name, source: 'nominatim',
     })))
     .catch(() => []);
 
@@ -810,7 +814,7 @@ async function geocodeAddress(str, facilityName = '') {
       const matches = data?.result?.addressMatches;
       if (!matches || matches.length === 0) return [];
       return matches.map(m => ({
-        lat: m.coordinates.y, lng: m.coordinates.x, display_name: m.matchedAddress,
+        lat: m.coordinates.y, lng: m.coordinates.x, display_name: m.matchedAddress, source: 'census',
       }));
     })
     .catch(() => []);
@@ -843,7 +847,18 @@ async function resolveLocation(input) {
   // 3. Address geocoding (Google Maps → Census → Nominatim)
   const facilityName = document.getElementById('sf-name')?.value?.trim() || '';
   const results = await geocodeAddress(trimmed, facilityName);
-  return { ...results[0], source: 'geocoded', alternatives: results.slice(1) };
+  return { ...results[0], alternatives: results.slice(1) };
+}
+
+function _sourceBadge(source) {
+  const badges = {
+    google:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-700/60 text-green-200">Google</span>',
+    census:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-700/60 text-blue-200">Census</span>',
+    nominatim:   '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-700/60 text-amber-200">Nominatim</span>',
+    google_maps: '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-600/60 text-gray-300">URL</span>',
+    raw_coords:  '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-600/60 text-gray-300">Manual</span>',
+  };
+  return badges[source] || '';
 }
 
 function showResolveResult(result) {
@@ -855,6 +870,7 @@ function showResolveResult(result) {
     <div class="flex items-center gap-2">
       <span class="text-green-400">&#10003;</span>
       <span class="text-gray-200 font-medium">${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}</span>
+      ${_sourceBadge(result.source)}
       <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 ml-auto">Edit</button>
     </div>
     <div class="text-xs text-gray-400 truncate" title="${esc(result.display_name)}">${esc(result.display_name)}</div>`;
@@ -865,6 +881,7 @@ function showResolveResult(result) {
       html += `<div class="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 cursor-pointer" onclick="pickAlternative(${i})">
         <span class="text-gray-600">&bull;</span>
         <span>${alt.lat.toFixed(6)}, ${alt.lng.toFixed(6)}</span>
+        ${_sourceBadge(alt.source)}
         <span class="truncate text-gray-500">${esc(alt.display_name)}</span>
       </div>`;
     });
@@ -881,9 +898,9 @@ function showResolveResult(result) {
 function pickAlternative(idx) {
   const alt = S.resolved.alternatives[idx];
   if (!alt) return;
-  const oldAlts = [{ lat: S.resolved.lat, lng: S.resolved.lng, display_name: S.resolved.display_name },
+  const oldAlts = [{ lat: S.resolved.lat, lng: S.resolved.lng, display_name: S.resolved.display_name, source: S.resolved.source },
     ...S.resolved.alternatives.filter((_, i) => i !== idx)];
-  showResolveResult({ ...alt, source: 'nominatim', alternatives: oldAlts });
+  showResolveResult({ ...alt, alternatives: oldAlts });
 }
 
 function showResolveError(msg) {
