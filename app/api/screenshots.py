@@ -28,5 +28,5 @@ async def get_screenshot(screenshot_id: UUID):
         return FileResponse(
             abs_path,
             media_type="image/png",
-            filename=ss.filename,
+            headers={"Content-Disposition": f"inline; filename=\"{ss.filename}\""},
         )
