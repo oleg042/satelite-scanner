@@ -633,8 +633,13 @@ async function deleteSelected() {
   try {
     const res = await api('DELETE', '/api/scans', { scan_ids: ids });
     toast(`Deleted ${res.deleted} scan${res.deleted !== 1 ? 's' : ''}`);
+    // Immediately remove deleted rows from local state for instant UI feedback
+    const deleted = new Set(ids);
+    S.scans = S.scans.filter(s => !deleted.has(s.id));
     S.selected.clear();
     updateDeleteBtn();
+    renderTable();
+    // Background refresh for accurate server state
     fetchScans();
     fetchHealth();
   } catch (e) {

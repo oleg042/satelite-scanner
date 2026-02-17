@@ -12,6 +12,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Chromium for Playwright (headless browser geocoding)
+RUN playwright install chromium --with-deps
+
 COPY . .
 
 EXPOSE 8000
