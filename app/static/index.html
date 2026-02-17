@@ -12,176 +12,235 @@
   .sort-desc::after { content: ' \u25BC'; font-size: .65em; }
   .toast{animation:slideIn .3s ease}
   @keyframes slideIn{from{transform:translateY(-1rem);opacity:0}to{transform:translateY(0);opacity:1}}
+  .nav-item{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:.375rem;font-size:.875rem;transition:all .15s;cursor:pointer;color:#9ca3af}
+  .nav-item:hover{background:#1f2937;color:#e5e7eb}
+  .nav-item.active{background:#1d4ed8;color:#fff}
 </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen">
+<body class="bg-gray-950 text-gray-100 min-h-screen flex">
 
 <!-- Toast container -->
 <div id="toasts" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
-<!-- Header -->
-<header class="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-  <h1 class="text-xl font-bold tracking-tight">Satellite Scanner</h1>
-  <div id="health-badge" class="flex items-center gap-2 text-sm">
-    <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
-    <span>Healthy</span>
-    <span class="text-gray-500">(<span id="queue-size">0</span>)</span>
+<!-- Sidebar -->
+<aside class="w-56 bg-gray-900 border-r border-gray-800 flex flex-col min-h-screen shrink-0">
+  <!-- Logo -->
+  <div class="px-4 py-5 border-b border-gray-800">
+    <h1 class="text-lg font-bold tracking-tight">Satellite Scanner</h1>
   </div>
-</header>
 
-<main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+  <!-- Navigation -->
+  <nav class="flex-1 px-3 py-4 space-y-1">
+    <a class="nav-item" data-page="scans" href="#scans">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      Scans
+    </a>
+    <a class="nav-item" data-page="settings" href="#settings">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      Settings
+    </a>
+  </nav>
 
-  <!-- Controls row -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-    <!-- New Scan form -->
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-      <h2 class="font-semibold text-sm uppercase tracking-wide text-gray-400 mb-3">New Scan</h2>
-      <form id="scan-form" class="space-y-2">
-        <input id="sf-name" type="text" placeholder="Facility name" required
-          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-        <div class="grid grid-cols-2 gap-2">
-          <input id="sf-lat" type="number" step="any" placeholder="Latitude" required
-            class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-          <input id="sf-lng" type="number" step="any" placeholder="Longitude" required
-            class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-        </div>
-        <input id="sf-addr" type="text" placeholder="Address (optional)"
-          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-        <button id="sf-submit" type="submit"
-          class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-2 text-sm transition">
-          Submit Scan
-        </button>
-      </form>
+  <!-- Health status at bottom -->
+  <div class="px-4 py-3 border-t border-gray-800">
+    <div id="health-badge" class="flex items-center gap-2 text-xs text-gray-400">
+      <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+      <span>Healthy</span>
+      <span class="text-gray-600">Queue: <span id="queue-size">0</span></span>
     </div>
+  </div>
+</aside>
 
-    <!-- Settings panel -->
-    <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-lg">
-      <button id="settings-toggle" class="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-400 hover:text-gray-200 transition">
-        <span class="font-semibold uppercase tracking-wide">Settings</span>
-        <svg id="settings-chevron" class="w-4 h-4 transform transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
-      </button>
-      <div id="settings-panel" class="hidden px-4 pb-4">
-        <form id="settings-form" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+<!-- Main content -->
+<div class="flex-1 flex flex-col min-h-screen overflow-hidden">
+
+  <!-- ==================== SCANS PAGE ==================== -->
+  <div id="page-scans" class="page flex-1 flex flex-col overflow-hidden">
+
+    <!-- Top bar: scan form + page header -->
+    <div class="border-b border-gray-800 bg-gray-900/50 px-6 py-4">
+      <div class="flex items-start gap-6">
+        <!-- New Scan form (inline) -->
+        <form id="scan-form" class="flex items-end gap-3 flex-wrap">
           <div>
-            <label class="block text-xs text-gray-500 mb-1">OpenAI API Key</label>
-            <input id="set-api-key" type="password" placeholder="sk-..."
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Validation Model</label>
-            <input id="set-validation-model" type="text" placeholder="gpt-4o-mini"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+            <label class="block text-xs text-gray-500 mb-1">Facility Name</label>
+            <input id="sf-name" type="text" placeholder="Acme Steel" required
+              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-44 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
           <div>
-            <label class="block text-xs text-gray-500 mb-1">Boundary Model</label>
-            <input id="set-boundary-model" type="text" placeholder="gpt-4o"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+            <label class="block text-xs text-gray-500 mb-1">Latitude</label>
+            <input id="sf-lat" type="number" step="any" placeholder="41.0534" required
+              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
           <div>
-            <label class="block text-xs text-gray-500 mb-1">Default Zoom</label>
-            <input id="set-default-zoom" type="number" min="16" max="22"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+            <label class="block text-xs text-gray-500 mb-1">Longitude</label>
+            <input id="sf-lng" type="number" step="any" placeholder="-80.6753" required
+              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
           <div>
-            <label class="block text-xs text-gray-500 mb-1">Buffer (m)</label>
-            <input id="set-buffer" type="number" min="10" max="500"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+            <label class="block text-xs text-gray-500 mb-1">Address</label>
+            <input id="sf-addr" type="text" placeholder="Optional"
+              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-44 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Overview Zoom</label>
-            <input id="set-overview-zoom" type="number" min="16" max="21"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-          </div>
-          <div class="sm:col-span-2 lg:col-span-3 flex justify-end">
-            <button type="submit"
-              class="bg-green-600 hover:bg-green-700 text-white font-medium rounded px-4 py-1.5 text-sm transition">
-              Save Settings
-            </button>
-          </div>
+          <button id="sf-submit" type="submit"
+            class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
+            Submit Scan
+          </button>
         </form>
       </div>
     </div>
-  </div>
 
-  <!-- Toolbar -->
-  <div class="flex flex-wrap items-center gap-3">
-    <input id="search-input" type="text" placeholder="Search facility name..."
-      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
-    <select id="filter-status"
-      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-      <option value="">All Statuses</option>
-      <option value="queued">Queued</option>
-      <option value="running_osm">Running OSM</option>
-      <option value="running_validate">Running Validate</option>
-      <option value="running_vision">Running Vision</option>
-      <option value="running_tiling">Running Tiling</option>
-      <option value="completed">Completed</option>
-      <option value="failed">Failed</option>
-      <option value="skipped">Skipped</option>
-    </select>
-    <select id="filter-method"
-      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-      <option value="">All Methods</option>
-      <option value="osm_building">OSM Building</option>
-      <option value="osm_landuse">OSM Landuse</option>
-      <option value="ai_vision">AI Vision</option>
-      <option value="fallback_radius">Fallback Radius</option>
-      <option value="skipped">Skipped</option>
-    </select>
-    <button id="refresh-btn" title="Refresh"
-      class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
-      &#8635; Refresh
-    </button>
-    <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
-  </div>
-
-  <!-- Table -->
-  <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-left">
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_validated">AI</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="duration">Duration</th>
-            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
-          </tr>
-        </thead>
-        <tbody id="scan-tbody"></tbody>
-      </table>
+    <!-- Toolbar -->
+    <div class="px-6 py-3 flex flex-wrap items-center gap-3 border-b border-gray-800/50">
+      <input id="search-input" type="text" placeholder="Search facility name..."
+        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
+      <select id="filter-status"
+        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+        <option value="">All Statuses</option>
+        <option value="queued">Queued</option>
+        <option value="running_osm">Running OSM</option>
+        <option value="running_validate">Running Validate</option>
+        <option value="running_vision">Running Vision</option>
+        <option value="running_tiling">Running Tiling</option>
+        <option value="completed">Completed</option>
+        <option value="failed">Failed</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <select id="filter-method"
+        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+        <option value="">All Methods</option>
+        <option value="osm_building">OSM Building</option>
+        <option value="osm_landuse">OSM Landuse</option>
+        <option value="ai_vision">AI Vision</option>
+        <option value="fallback_radius">Fallback Radius</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <button id="refresh-btn" title="Refresh"
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
+        &#8635; Refresh
+      </button>
+      <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
     </div>
-    <!-- Empty state -->
-    <div id="empty-state" class="hidden text-center py-12 text-gray-500">
-      No scans found. Submit a facility above to get started.
+
+    <!-- Table (scrollable) -->
+    <div class="flex-1 overflow-auto px-6 py-4">
+      <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 bg-gray-900 z-10">
+            <tr class="border-b border-gray-800 text-gray-400 text-left">
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_validated">AI</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="duration">Duration</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
+            </tr>
+          </thead>
+          <tbody id="scan-tbody"></tbody>
+        </table>
+        <!-- Empty state -->
+        <div id="empty-state" class="hidden text-center py-12 text-gray-500">
+          No scans found. Submit a facility above to get started.
+        </div>
+        <!-- Loading state -->
+        <div id="loading-state" class="text-center py-12 text-gray-500">
+          Loading scans...
+        </div>
+      </div>
     </div>
-    <!-- Loading state -->
-    <div id="loading-state" class="text-center py-12 text-gray-500">
-      Loading scans...
+
+    <!-- Pagination -->
+    <div class="px-6 py-3 border-t border-gray-800 flex items-center justify-between shrink-0">
+      <button id="prev-btn" disabled
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
+        &larr; Prev
+      </button>
+      <span id="page-info" class="text-sm text-gray-500"></span>
+      <button id="next-btn" disabled
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
+        Next &rarr;
+      </button>
     </div>
   </div>
 
-  <!-- Pagination -->
-  <div class="flex items-center justify-between">
-    <button id="prev-btn" disabled
-      class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
-      &larr; Prev
-    </button>
-    <span id="page-info" class="text-sm text-gray-500"></span>
-    <button id="next-btn" disabled
-      class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
-      Next &rarr;
-    </button>
+  <!-- ==================== SETTINGS PAGE ==================== -->
+  <div id="page-settings" class="page hidden flex-1 overflow-auto">
+    <div class="px-6 py-6 max-w-3xl">
+      <h2 class="text-xl font-bold mb-1">Settings</h2>
+      <p class="text-sm text-gray-500 mb-6">Configure API keys, AI models, and scan defaults.</p>
+
+      <form id="settings-form" class="space-y-6">
+        <!-- API Key -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">API Configuration</h3>
+          <div>
+            <label class="block text-sm text-gray-300 mb-1.5">OpenAI API Key</label>
+            <input id="set-api-key" type="password" placeholder="sk-..."
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none max-w-md">
+            <p class="text-xs text-gray-600 mt-1">Leave blank to keep current key. Current: <span id="set-api-key-mask" class="text-gray-500">not set</span></p>
+          </div>
+        </div>
+
+        <!-- Models -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Validation Model</label>
+              <input id="set-validation-model" type="text" placeholder="gpt-4o-mini"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Used for OSM bbox validation (step 2)</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Boundary Model</label>
+              <input id="set-boundary-model" type="text" placeholder="gpt-4o"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Used for AI vision fallback (step 3)</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scan Defaults -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Scan Defaults</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Default Zoom</label>
+              <input id="set-default-zoom" type="number" min="16" max="22"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Tile zoom for detail (16–22)</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Buffer (meters)</label>
+              <input id="set-buffer" type="number" min="10" max="500"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Padding around OSM bbox (10–500)</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Overview Zoom</label>
+              <input id="set-overview-zoom" type="number" min="16" max="21"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Zoom for AI validation images (16–21)</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Save -->
+        <div class="flex items-center gap-3">
+          <button type="submit"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded px-5 py-2 text-sm transition">
+            Save Settings
+          </button>
+          <span id="settings-status" class="text-sm text-gray-500"></span>
+        </div>
+      </form>
+    </div>
   </div>
 
-</main>
+</div>
 
 <script>
 // --- State ---
@@ -191,10 +250,31 @@ const S = {
   sortDir: 'asc',
   offset: 0,
   limit: 50,
-  expanded: {},       // scan_id -> trace data (cache)
-  expandedOpen: {},   // scan_id -> bool (open/closed)
+  expanded: {},
+  expandedOpen: {},
   pollTimer: null,
+  currentPage: 'scans',
 };
+
+// --- Router ---
+function navigate(page) {
+  S.currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  const target = document.getElementById(`page-${page}`);
+  if (target) target.classList.remove('hidden');
+
+  document.querySelectorAll('.nav-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.page === page);
+  });
+
+  if (page === 'settings') loadSettings();
+  if (page === 'scans') fetchScans();
+}
+
+function handleHash() {
+  const hash = location.hash.replace('#', '') || 'scans';
+  navigate(hash);
+}
 
 // --- API helper ---
 async function api(method, path, body) {
@@ -337,15 +417,12 @@ function renderTable() {
   });
   tbody.innerHTML = html;
 
-  // Attach row click handlers
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
     row.addEventListener('click', () => toggleRow(row.dataset.id));
   });
 
-  // Update count
   document.getElementById('scan-count').textContent = `${sorted.length} scan${sorted.length !== 1 ? 's' : ''}`;
 
-  // Pagination
   document.getElementById('prev-btn').disabled = S.offset === 0;
   document.getElementById('next-btn').disabled = sorted.length < S.limit;
   const page = Math.floor(S.offset / S.limit) + 1;
@@ -363,7 +440,6 @@ function renderDetail(scan) {
   const trace = S.expanded[scan.id];
   let html = '<div class="space-y-4">';
 
-  // Screenshots
   if (scan.screenshots && scan.screenshots.length > 0) {
     html += '<div class="flex flex-wrap gap-3">';
     scan.screenshots.forEach(ss => {
@@ -375,7 +451,6 @@ function renderDetail(scan) {
     html += '</div>';
   }
 
-  // Pipeline trace steps
   if (trace && trace.steps) {
     html += '<div class="space-y-2">';
     html += '<h4 class="text-xs font-semibold uppercase tracking-wide text-gray-400">Pipeline Trace</h4>';
@@ -389,7 +464,6 @@ function renderDetail(scan) {
         <span class="text-gray-500">${dur}</span>
         <span class="${stepColor}"> &rarr; ${esc(dec)}</span>`;
 
-      // AI token breakdown
       if (step.ai_tokens_total) {
         html += `<div class="text-xs text-gray-500 mt-1 ml-4">
           Model: <span class="text-gray-300">${esc(step.ai_model || '?')}</span> |
@@ -398,7 +472,6 @@ function renderDetail(scan) {
         </div>`;
       }
 
-      // Tile grid info
       if (step.tile_grid_cols && step.tile_grid_rows) {
         const total = step.tile_grid_cols * step.tile_grid_rows;
         html += `<div class="text-xs text-gray-500 mt-1 ml-4">
@@ -409,7 +482,6 @@ function renderDetail(scan) {
       html += '</div>';
     });
 
-    // Total AI tokens
     if (trace.total_ai_tokens) {
       html += `<div class="text-xs text-gray-400 mt-1">Total AI tokens: <span class="text-gray-200 font-medium">${trace.total_ai_tokens.toLocaleString()}</span></div>`;
     }
@@ -418,7 +490,6 @@ function renderDetail(scan) {
     html += '<div class="text-sm text-gray-500">Loading trace...</div>';
   }
 
-  // Scan metadata
   html += '<details class="text-xs"><summary class="text-gray-500 cursor-pointer hover:text-gray-300">Full Metadata</summary>';
   html += `<pre class="mt-2 bg-gray-950 rounded p-3 overflow-x-auto text-gray-400 max-h-64">${esc(JSON.stringify(scan, null, 2))}</pre>`;
   html += '</details>';
@@ -437,9 +508,8 @@ async function toggleRow(scanId) {
 
   S.expandedOpen[scanId] = true;
 
-  // Lazy-load trace if not cached
   if (!S.expanded[scanId]) {
-    renderTable(); // show "Loading trace..." immediately
+    renderTable();
     try {
       const trace = await api('GET', `/api/scan/${scanId}/steps`);
       S.expanded[scanId] = trace;
@@ -497,7 +567,8 @@ async function fetchHealth() {
 async function loadSettings() {
   try {
     const s = await api('GET', '/api/settings');
-    document.getElementById('set-api-key').placeholder = s.openai_api_key || 'sk-...';
+    document.getElementById('set-api-key').value = '';
+    document.getElementById('set-api-key-mask').textContent = s.openai_api_key || 'not set';
     document.getElementById('set-validation-model').value = s.validation_model || '';
     document.getElementById('set-boundary-model').value = s.boundary_model || '';
     document.getElementById('set-default-zoom').value = s.default_zoom || '';
@@ -530,7 +601,6 @@ async function saveSettings(e) {
   try {
     await api('PUT', '/api/settings', body);
     toast('Settings saved');
-    document.getElementById('set-api-key').value = '';
     loadSettings();
   } catch (e) {
     toast('Failed: ' + e.message, 'error');
@@ -572,14 +642,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Scan form
   document.getElementById('scan-form').addEventListener('submit', submitScan);
 
-  // Settings toggle
-  document.getElementById('settings-toggle').addEventListener('click', () => {
-    const panel = document.getElementById('settings-panel');
-    const chevron = document.getElementById('settings-chevron');
-    panel.classList.toggle('hidden');
-    chevron.classList.toggle('rotate-180');
-  });
-
   // Settings save
   document.getElementById('settings-form').addEventListener('submit', saveSettings);
 
@@ -615,17 +677,18 @@ document.addEventListener('DOMContentLoaded', () => {
         S.sortField = field;
         S.sortDir = 'asc';
       }
-      // Update header classes
       document.querySelectorAll('th[data-sort]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
       th.classList.add(S.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
       renderTable();
     });
   });
 
-  // Initial load
-  fetchScans();
+  // Router
+  window.addEventListener('hashchange', handleHash);
+  handleHash();
+
+  // Health polling
   fetchHealth();
-  loadSettings();
   setInterval(fetchHealth, 30000);
 });
 </script>
