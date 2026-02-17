@@ -102,46 +102,67 @@ async def query_osm_landuse(
     return landuse_areas
 
 
-def _building_stats(
+def _building_edge_distance(
     b: dict, target_lat: float, target_lng: float
-) -> tuple[float, float]:
-    """Compute area (m²) and distance (m) for a building."""
+) -> float:
+    """Minimum distance (m) from target point to nearest edge of building polygon."""
+    m_lng = meters_per_deg_lng(target_lat)
+    min_dist = float("inf")
+    for lat, lng in b["coords"]:
+        dlat = (lat - target_lat) * M_PER_DEG_LAT
+        dlng = (lng - target_lng) * m_lng
+        dist = math.sqrt(dlat**2 + dlng**2)
+        if dist < min_dist:
+            min_dist = dist
+    return min_dist
+
+
+def _building_area(b: dict, ref_lat: float) -> float:
+    """Approximate area (m²) of a building's bounding box."""
     lats = [c[0] for c in b["coords"]]
     lngs = [c[1] for c in b["coords"]]
-    center_lat = sum(lats) / len(lats)
-    center_lng = sum(lngs) / len(lngs)
-    dlat = (center_lat - target_lat) * M_PER_DEG_LAT
-    dlng = (center_lng - target_lng) * meters_per_deg_lng(target_lat)
-    dist = math.sqrt(dlat**2 + dlng**2)
-    area_m2 = ((max(lats) - min(lats)) * M_PER_DEG_LAT) * (
-        (max(lngs) - min(lngs)) * meters_per_deg_lng(target_lat)
+    return ((max(lats) - min(lats)) * M_PER_DEG_LAT) * (
+        (max(lngs) - min(lngs)) * meters_per_deg_lng(ref_lat)
     )
-    return area_m2, dist
+
+
+# Max distance (m) from pin to nearest building edge before we give up
+# and let AI vision handle it instead of guessing
+_MAX_EDGE_DISTANCE_M = 100
 
 
 def find_target_building(
     buildings: list[dict], target_lat: float, target_lng: float
 ) -> dict | None:
-    """Find the building containing the target point, or the largest nearby."""
+    """Find the building containing the target point, or the nearest one within range."""
     # Check if target point is inside any building polygon
     for b in buildings:
         if point_in_polygon(target_lat, target_lng, b["coords"]):
-            area_m2, _ = _building_stats(b, target_lat, target_lng)
-            logger.info("Target inside building %d (~%.0f m²)", b["id"], area_m2)
+            area = _building_area(b, target_lat)
+            logger.info("Target inside building %d (~%.0f m²)", b["id"], area)
             return b
 
-    # Pick the largest building (industrial — biggest building IS the target)
+    # Pick the nearest building by edge distance
     ranked = []
     for b in buildings:
-        area_m2, dist = _building_stats(b, target_lat, target_lng)
-        ranked.append((b, area_m2, dist))
+        edge_dist = _building_edge_distance(b, target_lat, target_lng)
+        area = _building_area(b, target_lat)
+        ranked.append((b, edge_dist, area))
 
     if not ranked:
         return None
 
-    ranked.sort(key=lambda x: x[1], reverse=True)
-    best, best_area, best_dist = ranked[0]
-    logger.info("Selected building %d (~%.0f m², %.0fm away)", best["id"], best_area, best_dist)
+    ranked.sort(key=lambda x: x[1])
+    best, best_dist, best_area = ranked[0]
+
+    if best_dist > _MAX_EDGE_DISTANCE_M:
+        logger.info(
+            "Nearest building %d is %.0fm away (>%dm) — deferring to AI vision",
+            best["id"], best_dist, _MAX_EDGE_DISTANCE_M,
+        )
+        return None
+
+    logger.info("Selected nearest building %d (~%.0f m², %.0fm from pin edge)", best["id"], best_area, best_dist)
     return best
 
 
