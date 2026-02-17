@@ -12,6 +12,7 @@ The facility's pin location is at the exact center of this image. The pin marks 
 
 ## WHAT TO EXCLUDE
 - Public roads and highways
+- Railroad tracks, rail yards, train depots, and rail infrastructure (unless the target IS a railroad company)
 - Vegetation and undeveloped land beyond the facility's operational footprint
 - Buildings that clearly belong to a different company or operation
 - Residential areas

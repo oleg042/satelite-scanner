@@ -296,3 +296,105 @@ def detect_facility_boundary(
     except Exception as e:
         logger.error("Boundary detection API error: %s", e)
         return None
+
+
+DEFAULT_VERIFICATION_PROMPT = """You are verifying an AI-detected facility boundary on a satellite image.
+
+The facility "{name}" should be centered in this image. A red rectangle has been drawn showing the detected boundary.
+
+Check the following:
+1. Is the target facility (the building/campus at or near the image center) FULLY inside the red rectangle, with no parts cut off at the edges?
+2. Does the rectangle tightly wrap the facility, or does it include large areas that clearly don't belong to this facility (e.g. neighboring properties, rail yards, highways, empty fields)?
+3. Is the rectangle centered roughly on the facility, or is it significantly shifted away from center?
+
+Respond with ONLY a JSON object:
+{{
+  "approved": true/false,
+  "reason": "brief explanation",
+  "issues": "any specific problems noticed (e.g. 'building cut off at bottom', 'includes rail yard')"
+}}"""
+
+
+@dataclass
+class VerificationResult:
+    approved: bool
+    reason: str
+    issues: str
+    raw_response: str = ""
+    prompt_text: str = ""
+    usage: Optional[TokenUsage] = None
+
+
+def verify_facility_boundary(
+    image_path: str,
+    name: str,
+    boundary: BoundaryResult,
+    api_key: str,
+    model: str = "gpt-4o-mini",
+) -> Optional[VerificationResult]:
+    """Draw detected bbox on overview image and ask a second model to verify it.
+
+    Returns VerificationResult or None on error.
+    """
+    if not api_key:
+        return None
+
+    try:
+        img = Image.open(image_path).copy()
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        # Draw red rectangle showing detected boundary (3px thick)
+        for offset in range(3):
+            draw.rectangle(
+                [boundary.left_x - offset, boundary.top_y - offset,
+                 boundary.right_x + offset, boundary.bottom_y + offset],
+                outline="red",
+            )
+
+        # Encode annotated image
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        img.close()
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        prompt = DEFAULT_VERIFICATION_PROMPT.format(name=name)
+
+        logger.info("Calling %s for boundary verification...", model)
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            max_completion_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        text = response.choices[0].message.content.strip()
+        logger.info("Verification response: %s", text)
+
+        usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            reasoning_tokens=getattr(response.usage.completion_tokens_details, "reasoning_tokens", 0) or 0,
+            total_tokens=response.usage.total_tokens,
+        )
+
+        data = _parse_json_response(text)
+        return VerificationResult(
+            approved=data.get("approved", False),
+            reason=data.get("reason", ""),
+            issues=data.get("issues", ""),
+            raw_response=text,
+            prompt_text=prompt,
+            usage=usage,
+        )
+    except Exception as e:
+        logger.error("Verification API error: %s", e)
+        return None

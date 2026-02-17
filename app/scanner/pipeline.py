@@ -38,7 +38,7 @@ from app.scanner.osm import (
 from PIL import Image as PILImage
 
 from app.scanner.tiles import capture_area, crop_to_bbox
-from app.scanner.vision import detect_facility_boundary, validate_osm_bbox
+from app.scanner.vision import detect_facility_boundary, validate_osm_bbox, verify_facility_boundary
 
 logger = logging.getLogger(__name__)
 
@@ -372,8 +372,8 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     config["boundary_prompt"],
                 )
 
-                ai_elapsed = int((time.monotonic() - ai_start) * 1000)
                 vision_decision = None
+                verification = None
 
                 if boundary:
                     scan.ai_confidence = boundary.confidence
@@ -392,6 +392,7 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     is_non_industrial = any(kw in ft_lower for kw in NON_INDUSTRIAL_TYPES)
 
                     if boundary.confidence == "low" and is_non_industrial:
+                        ai_elapsed = int((time.monotonic() - ai_start) * 1000)
                         vision_decision = f"SKIPPED — AI detected non-industrial facility: {boundary.facility_type}"
                         scan.status = ScanStatus.skipped
                         scan.method = ScanMethod.skipped
@@ -433,20 +434,57 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                         ov_img.close()
                         return
 
-                    # Convert pixel bbox to lat/lng
-                    lat1, lng1 = pixel_to_latlng(boundary.left_x, boundary.top_y, ov_grid)
-                    lat2, lng2 = pixel_to_latlng(boundary.right_x, boundary.bottom_y, ov_grid)
-                    raw_bbox = (min(lat1, lat2), min(lng1, lng2), max(lat1, lat2), max(lng1, lng2))
-                    final_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
-                    method = ScanMethod.ai_vision
-                    vision_decision = (
-                        f"AI detected facility boundary — confidence: {boundary.confidence}, "
-                        f"type: {boundary.facility_type}, {boundary.building_count} buildings. "
-                        f"Pixel bbox: ({boundary.left_x},{boundary.top_y})-({boundary.right_x},{boundary.bottom_y}) "
-                        f"→ geo bbox: {[round(x, 6) for x in final_bbox]}"
+                    # Verify boundary with a second AI call
+                    verification = await asyncio.to_thread(
+                        verify_facility_boundary,
+                        abs_path, facility_name, boundary,
+                        config["api_key"], config["validation_model"],
                     )
+
+                    if verification and not verification.approved:
+                        logger.info("Boundary rejected: %s. Retrying with feedback...", verification.reason)
+
+                        # Retry boundary detection with rejection feedback
+                        retry_extra = (
+                            f"\n\n## IMPORTANT CORRECTION\n"
+                            f"A previous attempt was rejected: {verification.reason}\n"
+                            f"Issues found: {verification.issues}\n"
+                            f"Please correct these issues in your new boundary detection."
+                        )
+                        retry_prompt = (config["boundary_prompt"] or "") + retry_extra
+                        boundary = await asyncio.to_thread(
+                            detect_facility_boundary,
+                            abs_path, facility_name, lat, lng, width_m, height_m,
+                            config["api_key"], config["boundary_model"],
+                            retry_prompt,
+                        )
+
+                        if boundary:
+                            scan.ai_confidence = boundary.confidence
+                            scan.ai_facility_type = boundary.facility_type
+                            scan.ai_building_count = boundary.building_count
+                            scan.ai_notes = boundary.notes
+
+                    # Convert pixel bbox to lat/lng
+                    if boundary:
+                        lat1, lng1 = pixel_to_latlng(boundary.left_x, boundary.top_y, ov_grid)
+                        lat2, lng2 = pixel_to_latlng(boundary.right_x, boundary.bottom_y, ov_grid)
+                        raw_bbox = (min(lat1, lat2), min(lng1, lng2), max(lat1, lat2), max(lng1, lng2))
+                        final_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                        method = ScanMethod.ai_vision
+                        verified_str = "verified" if (not verification or verification.approved) else "retry after rejection"
+                        vision_decision = (
+                            f"AI detected facility boundary ({verified_str}) — confidence: {boundary.confidence}, "
+                            f"type: {boundary.facility_type}, {boundary.building_count} buildings. "
+                            f"Pixel bbox: ({boundary.left_x},{boundary.top_y})-({boundary.right_x},{boundary.bottom_y}) "
+                            f"→ geo bbox: {[round(x, 6) for x in final_bbox]}"
+                        )
+                    else:
+                        vision_decision = "AI boundary detection failed. Will fall back to radius."
                 else:
                     vision_decision = "AI boundary detection failed (returned None). Will fall back to radius."
+
+                ai_elapsed = int((time.monotonic() - ai_start) * 1000)
 
                 await _record_step(
                     db, scan_id, step_num, "ai_vision",
@@ -466,6 +504,11 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                         "building_count": boundary.building_count if boundary else None,
                         "notes": boundary.notes if boundary else None,
                         "detected_bbox": list(final_bbox) if final_bbox and method == ScanMethod.ai_vision else None,
+                        "verification": {
+                            "approved": verification.approved,
+                            "reason": verification.reason,
+                            "issues": verification.issues,
+                        } if verification else None,
                     }),
                     decision=vision_decision,
                     ai_model=config["boundary_model"],
