@@ -109,11 +109,17 @@
 
     <!-- Toolbar -->
     <div class="px-6 py-3 flex flex-wrap items-center gap-3 border-b border-gray-800/50">
-      <input id="search-input" type="text" placeholder="Search facility name..."
+      <input id="search-input" type="text" placeholder="Search name or address..."
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
+      <div class="flex rounded-lg overflow-hidden border border-gray-700">
+        <button data-pill="all" class="pill-btn px-3 py-1.5 text-sm font-medium bg-blue-600 text-white transition">All</button>
+        <button data-pill="unprocessed" class="pill-btn px-3 py-1.5 text-sm font-medium bg-gray-800 text-gray-400 hover:text-gray-200 transition">Unprocessed</button>
+        <button data-pill="processed" class="pill-btn px-3 py-1.5 text-sm font-medium bg-gray-800 text-gray-400 hover:text-gray-200 transition">Processed</button>
+      </div>
       <select id="filter-status"
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
         <option value="">All Statuses</option>
+        <option value="pending">Pending</option>
         <option value="queued">Queued</option>
         <option value="running_osm">Running OSM</option>
         <option value="running_validate">Running Validate</option>
@@ -132,6 +138,10 @@
         <option value="fallback_radius">Fallback Radius</option>
         <option value="skipped">Skipped</option>
       </select>
+      <button id="import-btn" title="Bulk import facilities"
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
+        Import
+      </button>
       <button id="refresh-btn" title="Refresh"
         class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
         &#8635; Refresh
@@ -152,6 +162,7 @@
               <th class="px-3 py-2.5 w-8"><input id="select-all" type="checkbox" class="rounded bg-gray-800 border-gray-600 cursor-pointer"></th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_address">Address</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
@@ -188,6 +199,29 @@
         class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
         Next &rarr;
       </button>
+    </div>
+  </div>
+
+  <!-- ==================== IMPORT MODAL ==================== -->
+  <div id="import-modal" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+    <div class="bg-gray-900 border border-gray-700 rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+        <h3 class="font-semibold">Bulk Import Facilities</h3>
+        <button onclick="closeImportModal()" class="text-gray-500 hover:text-gray-300 text-lg">&times;</button>
+      </div>
+      <div class="px-5 py-4 space-y-3">
+        <p class="text-sm text-gray-400">Paste tab-separated rows: <code class="text-xs bg-gray-800 px-1 rounded">Company Name&#9;Address</code></p>
+        <textarea id="import-textarea" rows="10" placeholder="Acme Steel Corp&#9;123 Industrial Blvd, Detroit, MI&#10;Metro Fabricators&#9;456 Factory Rd, Cleveland, OH&#10;Precision Metals"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono focus:ring-1 focus:ring-blue-500 outline-none resize-y"></textarea>
+        <div class="flex items-center justify-between">
+          <span id="import-count" class="text-sm text-gray-500">0 entries</span>
+          <div class="flex gap-2">
+            <button onclick="closeImportModal()" class="bg-gray-700 hover:bg-gray-600 text-white font-medium rounded px-4 py-1.5 text-sm transition">Cancel</button>
+            <button id="import-submit-btn" onclick="submitImport()" disabled
+              class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition">Import</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -305,6 +339,7 @@ const S = {
   selected: new Set(),
   pollTimer: null,
   currentPage: 'scans',
+  activePill: 'all',
   // Geocoding resolved state
   resolved: null, // { lat, lng, display_name, source }
 };
@@ -354,6 +389,7 @@ function toast(msg, type = 'success') {
 // --- Status badge ---
 function statusBadge(status) {
   const map = {
+    pending: 'bg-purple-700 text-purple-100',
     queued: 'bg-gray-600 text-gray-100',
     running_osm: 'bg-yellow-600 text-yellow-100 pulse-badge',
     running_validate: 'bg-yellow-600 text-yellow-100 pulse-badge',
@@ -430,6 +466,7 @@ function getSortValue(scan, field, idx) {
   switch (field) {
     case 'index': return idx;
     case 'facility_name': return (scan.facility_name || '').toLowerCase();
+    case 'facility_address': return (scan.facility_address || '').toLowerCase();
     case 'status': return scan.status || '';
     case 'method': return scan.method || '';
     case 'ai_validated': return scan.ai_validated === true ? 2 : scan.ai_validated === false ? 1 : 0;
@@ -483,6 +520,7 @@ function renderTable() {
       <td class="px-3 py-2" onclick="event.stopPropagation()"><input type="checkbox" class="row-check rounded bg-gray-800 border-gray-600 cursor-pointer" data-id="${scan.id}" ${checked}></td>
       <td class="px-3 py-2 text-gray-500">${rowNum}</td>
       <td class="px-3 py-2 font-medium">${esc(scan.facility_name || '-')}</td>
+      <td class="px-3 py-2 text-gray-400 max-w-[14rem] truncate" title="${esc(scan.facility_address || '')}">${esc(scan.facility_address || '-')}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
@@ -495,7 +533,7 @@ function renderTable() {
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="13" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="14" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
@@ -673,11 +711,19 @@ async function deleteSelected() {
 // --- Fetch scans ---
 async function fetchScans() {
   const params = new URLSearchParams();
-  const status = document.getElementById('filter-status').value;
   const method = document.getElementById('filter-method').value;
   const search = document.getElementById('search-input').value.trim();
 
-  if (status) params.set('status', status);
+  // Pill filter takes precedence
+  if (S.activePill === 'unprocessed') {
+    params.set('status', 'pending');
+  } else if (S.activePill === 'processed') {
+    params.set('exclude_status', 'pending');
+  } else {
+    // "All" pill — use dropdown if set
+    const status = document.getElementById('filter-status').value;
+    if (status) params.set('status', status);
+  }
   if (method) params.set('method', method);
   if (search) params.set('search', search);
   params.set('limit', S.limit);
@@ -693,7 +739,7 @@ async function fetchScans() {
 }
 
 // --- Polling ---
-const TERMINAL = new Set(['completed', 'failed', 'skipped']);
+const TERMINAL = new Set(['completed', 'failed', 'skipped', 'pending']);
 
 function managePoll() {
   const hasActive = S.scans.some(s => !TERMINAL.has(s.status));
@@ -793,51 +839,27 @@ function parseRawCoords(str) {
   return { lat, lng };
 }
 
-async function geocodeCensus(str) {
-  const res = await fetch(`/api/geocode/census?address=${encodeURIComponent(str)}`);
-  if (!res.ok) throw new Error(`Census Geocoder returned ${res.status}`);
-  const data = await res.json();
-  const matches = data?.result?.addressMatches;
-  if (!matches || matches.length === 0) throw new Error('No results found for this address');
-  const m = matches[0];
-  return [{ lat: m.coordinates.y, lng: m.coordinates.x, display_name: m.matchedAddress }];
-}
+// --- Geocoder helpers (each returns [] on failure, never throws) ---
 
-async function geocodeAddress(str, facilityName = '') {
-  // Step 1: Try Google Maps search (name + address → precise place resolution)
-  if (facilityName) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 25000);
-    try {
-      const gParams = new URLSearchParams({ name: facilityName, address: str });
-      const gRes = await fetch(`/api/geocode/google-search?${gParams}`, { signal: controller.signal });
-      if (gRes.ok) {
-        const gData = await gRes.json();
-        if (gData.results && gData.results.length > 0) {
-          return gData.results.map(r => ({
-            lat: r.lat, lng: r.lng, display_name: r.display_name, source: 'google',
-          }));
-        }
-        // Log why it didn't work (for debugging)
-        if (gData.error) console.warn('Google Maps geocode:', gData.error);
-      }
-    } catch (e) {
+function fetchGoogle(facilityName, address) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000); // hard ceiling
+  const params = new URLSearchParams({ name: facilityName, address });
+  return fetch(`/api/geocode/google-search?${params}`, { signal: controller.signal })
+    .then(r => r.ok ? r.json() : { results: [] })
+    .then(data => (data.results || []).map(r => ({
+      lat: r.lat, lng: r.lng, display_name: r.display_name, source: 'google',
+    })))
+    .catch(e => {
       if (e.name === 'AbortError') console.warn('Google Maps geocode timed out after 25s');
       else console.warn('Google Maps geocode failed:', e);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
+      return [];
+    })
+    .finally(() => clearTimeout(timer));
+}
 
-  // Step 2+3: Census + Nominatim in parallel
-  const nominatimP = fetch(`/api/geocode/nominatim?address=${encodeURIComponent(str)}`)
-    .then(r => r.ok ? r.json() : [])
-    .then(data => (data || []).map(r => ({
-      lat: parseFloat(r.lat), lng: parseFloat(r.lon), display_name: r.display_name, source: 'nominatim',
-    })))
-    .catch(() => []);
-
-  const censusP = fetch(`/api/geocode/census?address=${encodeURIComponent(str)}`)
+function fetchCensus(address) {
+  return fetch(`/api/geocode/census?address=${encodeURIComponent(address)}`)
     .then(r => r.ok ? r.json() : null)
     .then(data => {
       const matches = data?.result?.addressMatches;
@@ -847,13 +869,40 @@ async function geocodeAddress(str, facilityName = '') {
       }));
     })
     .catch(() => []);
+}
 
+function fetchNominatim(address) {
+  return fetch(`/api/geocode/nominatim?address=${encodeURIComponent(address)}`)
+    .then(r => r.ok ? r.json() : [])
+    .then(data => (data || []).map(r => ({
+      lat: parseFloat(r.lat), lng: parseFloat(r.lon), display_name: r.display_name, source: 'nominatim',
+    })))
+    .catch(() => []);
+}
+
+async function geocodeAddress(str, facilityName = '') {
+  // Fire all geocoders in parallel immediately
+  const googleP = facilityName ? fetchGoogle(facilityName, str) : Promise.resolve([]);
+  const censusP = fetchCensus(str);
+  const nominatimP = fetchNominatim(str);
+
+  // Wait for fast geocoders (Census + Nominatim typically ~1-2s)
   const [census, nominatim] = await Promise.all([censusP, nominatimP]);
+  const fallback = census.length > 0 ? census : (nominatim.length > 0 ? nominatim : []);
 
-  // Census is authoritative for US addresses — use exclusively when available
-  // Nominatim is fallback for international addresses or Census misses
-  if (census.length > 0) return census;
-  if (nominatim.length > 0) return nominatim;
+  if (fallback.length > 0) {
+    // Have backup — give Google limited extra time (8s) to beat the fallback
+    const google = await Promise.race([
+      googleP,
+      new Promise(resolve => setTimeout(() => resolve([]), 8000)),
+    ]);
+    if (google.length > 0) return google;
+    return fallback;
+  }
+
+  // No fallback — wait for Google fully (it's the only hope)
+  const google = await googleP;
+  if (google.length > 0) return google;
   throw new Error('No results found for this address');
 }
 
@@ -1027,6 +1076,78 @@ async function submitScan(e) {
   }
 }
 
+// --- Pill filters ---
+function setActivePill(pill) {
+  S.activePill = pill;
+  S.offset = 0;
+  document.querySelectorAll('.pill-btn').forEach(btn => {
+    const active = btn.dataset.pill === pill;
+    btn.className = `pill-btn px-3 py-1.5 text-sm font-medium transition ${active ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`;
+  });
+  // Disable status dropdown when a non-"All" pill is active
+  const statusDD = document.getElementById('filter-status');
+  statusDD.disabled = pill !== 'all';
+  if (pill !== 'all') statusDD.value = '';
+  fetchScans();
+}
+
+// --- Import modal ---
+function openImportModal() {
+  document.getElementById('import-modal').classList.remove('hidden');
+  document.getElementById('import-textarea').value = '';
+  updateImportCount();
+  document.getElementById('import-textarea').focus();
+}
+
+function closeImportModal() {
+  document.getElementById('import-modal').classList.add('hidden');
+}
+
+function parseImportLines(text) {
+  return text.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .map(line => {
+      const tabIdx = line.indexOf('\t');
+      if (tabIdx === -1) return { name: line, address: null };
+      return { name: line.slice(0, tabIdx).trim(), address: line.slice(tabIdx + 1).trim() || null };
+    })
+    .filter(item => item.name.length > 0);
+}
+
+function updateImportCount() {
+  const items = parseImportLines(document.getElementById('import-textarea').value);
+  const count = items.length;
+  document.getElementById('import-count').textContent = `${count} entr${count === 1 ? 'y' : 'ies'}`;
+  document.getElementById('import-submit-btn').disabled = count === 0;
+}
+
+async function submitImport() {
+  const items = parseImportLines(document.getElementById('import-textarea').value);
+  if (items.length === 0) return;
+  if (items.length > 200) {
+    toast('Max 200 entries per import', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('import-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+
+  try {
+    const res = await api('POST', '/api/scan/import', { facilities: items });
+    toast(`Imported ${res.length} facilit${res.length === 1 ? 'y' : 'ies'}`);
+    closeImportModal();
+    S.offset = 0;
+    fetchScans();
+  } catch (e) {
+    toast('Import failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
+}
+
 // --- Event listeners ---
 document.addEventListener('DOMContentLoaded', () => {
   // Scan form
@@ -1051,6 +1172,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
   document.getElementById('filter-method').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+
+  // Pill filter clicks
+  document.querySelectorAll('.pill-btn').forEach(btn => {
+    btn.addEventListener('click', () => setActivePill(btn.dataset.pill));
+  });
+
+  // Import modal
+  document.getElementById('import-btn').addEventListener('click', openImportModal);
+  document.getElementById('import-textarea').addEventListener('input', updateImportCount);
 
   // Select all checkbox
   document.getElementById('select-all').addEventListener('change', (e) => {

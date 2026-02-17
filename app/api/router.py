@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-import threading
+import re
+import urllib.parse
 
 import httpx
 from fastapi import APIRouter, Depends, Query
@@ -23,8 +24,47 @@ from app.api.screenshots import router as screenshots_router
 
 logger = logging.getLogger(__name__)
 
-# Limit concurrent headless browser instances (each uses ~150MB RAM)
-_browser_semaphore = threading.Semaphore(2)
+# --- Persistent headless browser (shared across requests) ---
+_pw = None          # Playwright instance
+_browser = None     # Chromium browser instance
+_browser_lock = asyncio.Lock()
+_browser_semaphore = asyncio.Semaphore(2)  # max 2 concurrent contexts (~150MB each)
+
+
+async def _get_browser():
+    """Return the persistent Chromium browser, launching it lazily on first use."""
+    global _pw, _browser
+    async with _browser_lock:
+        if _browser and _browser.is_connected():
+            return _browser
+        from playwright.async_api import async_playwright
+        if _pw is None:
+            _pw = await async_playwright().start()
+        _browser = await _pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
+        logger.info("Persistent Chromium browser launched")
+    return _browser
+
+
+async def shutdown_browser():
+    """Close the persistent browser and stop Playwright. Called at app shutdown."""
+    global _pw, _browser
+    if _browser:
+        try:
+            await _browser.close()
+        except Exception:
+            pass
+        _browser = None
+    if _pw:
+        try:
+            await _pw.stop()
+        except Exception:
+            pass
+        _pw = None
+    logger.info("Browser shut down")
+
 
 api_router = APIRouter(prefix="/api")
 
@@ -113,7 +153,7 @@ async def geocode_google_search(name: str = Query(""), address: str = Query(""))
         return JSONResponse(content={"results": [], "error": "No query"})
 
     try:
-        result = await asyncio.to_thread(_google_search_resolve, query)
+        result = await _google_search_resolve(query)
         if result:
             return JSONResponse(content={"results": [result]})
         return JSONResponse(content={"results": []})
@@ -122,104 +162,94 @@ async def geocode_google_search(name: str = Query(""), address: str = Query(""))
         return JSONResponse(content={"results": [], "error": str(e)})
 
 
-def _google_search_resolve(query: str) -> dict | None:
-    """Use headless browser to resolve a Google Maps search to coordinates."""
+async def _google_search_resolve(query: str) -> dict | None:
+    """Use persistent headless browser to resolve a Google Maps search to coordinates."""
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright  # noqa: F401 — import check
     except ImportError:
         logger.warning("Playwright not installed — Google Maps geocoding unavailable")
         return None
 
-    import re
-    import urllib.parse
+    context = None
+    async with _browser_semaphore:
+        try:
+            search_url = f"https://www.google.com/maps/search/{urllib.parse.quote(query)}"
+            browser = await _get_browser()
 
-    if not _browser_semaphore.acquire(blocking=False):
-        logger.info("Browser semaphore full — skipping Google Maps geocode")
-        return None
-
-    try:
-        search_url = f"https://www.google.com/maps/search/{urllib.parse.quote(query)}"
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                locale="en-US",
             )
+            # Skip Google's cookie consent page
+            await context.add_cookies([{
+                "name": "SOCS",
+                "value": "CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjMwODI5LjA3X3AxGgJlbiADGgYIgJa9pwY",
+                "domain": ".google.com", "path": "/",
+            }, {
+                "name": "CONSENT",
+                "value": "YES+cb.20231229-04-p0.en+FX+411",
+                "domain": ".google.com", "path": "/",
+            }])
+
+            page = await context.new_page()
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+
+            # Wait for URL to contain @ (coordinates resolved by Google JS)
             try:
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    locale="en-US",
-                )
-                # Skip Google's cookie consent page
-                context.add_cookies([{
-                    "name": "SOCS",
-                    "value": "CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjMwODI5LjA3X3AxGgJlbiADGgYIgJa9pwY",
-                    "domain": ".google.com", "path": "/",
-                }, {
-                    "name": "CONSENT",
-                    "value": "YES+cb.20231229-04-p0.en+FX+411",
-                    "domain": ".google.com", "path": "/",
-                }])
+                await page.wait_for_url(re.compile(r"@-?\d+\.\d+,-?\d+\.\d+"), timeout=20000)
+            except Exception:
+                logger.info("Google Maps did not resolve coordinates for: %s", query)
+                return None
 
-                page = context.new_page()
-                page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-
-                # Wait for URL to contain @ (coordinates resolved by Google JS)
-                try:
-                    page.wait_for_url(re.compile(r"@-?\d+\.\d+,-?\d+\.\d+"), timeout=20000)
-                except Exception:
-                    logger.info("Google Maps did not resolve coordinates for: %s", query)
-                    return None
-
-                final_url = page.url
-            finally:
-                browser.close()
-
-        is_place = "/place/" in final_url
-
-        # Extract zoom from viewport @ for precision check
-        viewport_m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+),(\d+(?:\.\d+)?)(z|m)", final_url)
-        if not viewport_m:
+            final_url = page.url
+        except Exception as e:
+            logger.warning("Google Maps geocode error for '%s': %s: %s", query, type(e).__name__, e)
             return None
+        finally:
+            if context:
+                await context.close()
 
-        zoom_val = float(viewport_m.group(3))
-        zoom_unit = viewport_m.group(4)
+    # Parse result outside the semaphore (no browser needed)
+    is_place = "/place/" in final_url
 
-        # Prefer exact place coordinates from data section (!3d<lat>!4d<lng>)
-        # The @ coordinates are the viewport center, which can drift ~200m from the pin
-        place_m = re.search(r"!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)", final_url)
-        if place_m:
-            lat = float(place_m.group(1))
-            lng = float(place_m.group(2))
-        else:
-            lat = float(viewport_m.group(1))
-            lng = float(viewport_m.group(2))
-
-        # Determine if this is a precise match
-        # z format: zoom level (17z = close, 13z = far) — 15+ is precise
-        # m format: distance in meters (719m = close, 5745m = far) — <3000 is precise
-        is_precise = (zoom_unit == "z" and zoom_val >= 15) or (zoom_unit == "m" and zoom_val < 3000)
-
-        if is_place and is_precise:
-            return {
-                "lat": lat,
-                "lng": lng,
-                "display_name": f"Google Maps: {query}",
-                "confidence": "high",
-                "zoom": f"{zoom_val}{zoom_unit}",
-                "source": "google_maps_search",
-            }
-
-        # Not precise enough — log and skip
-        logger.info("Google Maps: %s match (%s%.0f%s) for: %s",
-                    "place" if is_place else "search", "" if is_place else "no /place/, ",
-                    zoom_val, zoom_unit, query)
+    # Extract zoom from viewport @ for precision check
+    viewport_m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+),(\d+(?:\.\d+)?)(z|m)", final_url)
+    if not viewport_m:
         return None
-    except Exception as e:
-        logger.warning("Google Maps geocode error for '%s': %s: %s", query, type(e).__name__, e)
-        return None
-    finally:
-        _browser_semaphore.release()
+
+    zoom_val = float(viewport_m.group(3))
+    zoom_unit = viewport_m.group(4)
+
+    # Prefer exact place coordinates from data section (!3d<lat>!4d<lng>)
+    # The @ coordinates are the viewport center, which can drift ~200m from the pin
+    place_m = re.search(r"!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)", final_url)
+    if place_m:
+        lat = float(place_m.group(1))
+        lng = float(place_m.group(2))
+    else:
+        lat = float(viewport_m.group(1))
+        lng = float(viewport_m.group(2))
+
+    # Determine if this is a precise match
+    # z format: zoom level (17z = close, 13z = far) — 15+ is precise
+    # m format: distance in meters (719m = close, 5745m = far) — <3000 is precise
+    is_precise = (zoom_unit == "z" and zoom_val >= 15) or (zoom_unit == "m" and zoom_val < 3000)
+
+    if is_place and is_precise:
+        return {
+            "lat": lat,
+            "lng": lng,
+            "display_name": f"Google Maps: {query}",
+            "confidence": "high",
+            "zoom": f"{zoom_val}{zoom_unit}",
+            "source": "google_maps_search",
+        }
+
+    # Not precise enough — log and skip
+    logger.info("Google Maps: %s match (%s%.0f%s) for: %s",
+                "place" if is_place else "search", "" if is_place else "no /place/, ",
+                zoom_val, zoom_unit, query)
+    return None
 
 
 # --- Health check (at root, not /api) ---

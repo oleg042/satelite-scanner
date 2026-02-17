@@ -21,6 +21,15 @@ class ScanRequest(BaseModel):
     boundary_model: Optional[str] = None
 
 
+class BulkImportItem(BaseModel):
+    name: str
+    address: Optional[str] = None
+
+
+class BulkImportRequest(BaseModel):
+    facilities: list[BulkImportItem] = Field(..., min_length=1, max_length=200)
+
+
 class BatchScanRequest(BaseModel):
     facilities: list[ScanRequest] = Field(..., max_length=50)
 
@@ -99,8 +108,8 @@ class ScanSubmitted(BaseModel):
 class FacilityResponse(BaseModel):
     id: UUID
     name: str
-    lat: float
-    lng: float
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     address: Optional[str] = None
     created_at: datetime
     scan_count: int = 0
@@ -146,8 +155,8 @@ class ScanStepResponse(BaseModel):
 class ScanTraceResponse(BaseModel):
     scan_id: UUID
     facility_name: str
-    lat: float
-    lng: float
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     status: str
     method: Optional[str] = None
     started_at: Optional[datetime] = None

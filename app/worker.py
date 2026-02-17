@@ -25,6 +25,10 @@ async def _worker(worker_id: int):
     logger.info("Worker %d ready", worker_id)
     while True:
         scan_id, facility_name, lat, lng = await scan_queue.get()
+        if lat is None or lng is None:
+            logger.warning("[W%d] Skipping scan %s — no coordinates", worker_id, scan_id)
+            scan_queue.task_done()
+            continue
         logger.info("[W%d] Processing scan %s (%s)...", worker_id, scan_id, facility_name)
         try:
             async with async_session() as db:

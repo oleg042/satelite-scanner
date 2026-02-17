@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models import Facility, Scan, ScanStatus, ScanStep, Screenshot
 from app.schemas import (
     BatchScanRequest,
+    BulkImportRequest,
     ScanRequest,
     ScanResponse,
     ScanStepResponse,
@@ -135,6 +136,25 @@ async def submit_batch(req: BatchScanRequest, db: AsyncSession = Depends(get_db)
     return results
 
 
+@router.post("/scan/import", response_model=list[ScanSubmitted], status_code=202)
+async def import_facilities(req: BulkImportRequest, db: AsyncSession = Depends(get_db)):
+    """Import facilities by name/address — no coordinates, no worker queue."""
+    results = []
+    for item in req.facilities:
+        facility = Facility(name=item.name, address=item.address, lat=None, lng=None)
+        db.add(facility)
+        await db.flush()
+
+        scan = Scan(facility_id=facility.id, status=ScanStatus.pending)
+        db.add(scan)
+        await db.flush()
+
+        results.append(ScanSubmitted(scan_id=scan.id, facility_id=facility.id, status="pending"))
+
+    await db.commit()
+    return results
+
+
 @router.get("/scan/{scan_id}", response_model=ScanResponse)
 async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     """Get scan status and results."""
@@ -148,23 +168,26 @@ async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
 @router.get("/scans", response_model=list[ScanResponse])
 async def list_scans(
     status: str | None = Query(None),
+    exclude_status: str | None = Query(None),
     method: str | None = Query(None),
     search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """List scans with optional filtering and facility name search."""
+    """List scans with optional filtering and facility name/address search."""
     q = select(Scan, Facility.name.label("facility_name"), Facility.address.label("facility_address"), Facility.lat.label("facility_lat"), Facility.lng.label("facility_lng")).join(
         Facility, Scan.facility_id == Facility.id, isouter=True
-    ).order_by(Scan.started_at.desc().nullslast())
+    ).order_by(Scan.started_at.desc().nullslast(), Facility.created_at.desc())
 
     if status:
         q = q.where(Scan.status == status)
+    if exclude_status:
+        q = q.where(Scan.status != exclude_status)
     if method:
         q = q.where(Scan.method == method)
     if search:
-        q = q.where(Facility.name.ilike(f"%{search}%"))
+        q = q.where(Facility.name.ilike(f"%{search}%") | Facility.address.ilike(f"%{search}%"))
 
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
@@ -246,8 +269,8 @@ async def get_scan_steps(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     return ScanTraceResponse(
         scan_id=scan.id,
         facility_name=facility.name if facility else "unknown",
-        lat=facility.lat if facility else 0,
-        lng=facility.lng if facility else 0,
+        lat=facility.lat if facility else None,
+        lng=facility.lng if facility else None,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
         method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
         started_at=scan.started_at,

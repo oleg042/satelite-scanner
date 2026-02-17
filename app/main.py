@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.router import api_router, health_router
+from app.api.router import api_router, health_router, shutdown_browser
 from app.config import settings
 from app.database import engine
 from app.models import Base, Setting
@@ -38,8 +38,30 @@ DEFAULT_SETTINGS = {
 
 
 async def _init_db():
-    """Create tables and seed default settings."""
+    """Create tables, run migrations, and seed default settings."""
+    # 1. Enum migration — MUST be outside a transaction (PG restriction)
+    try:
+        conn = await engine.connect()
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        await conn.execute(text(
+            "ALTER TYPE scan_status ADD VALUE IF NOT EXISTS 'pending' BEFORE 'queued'"
+        ))
+        await conn.close()
+    except Exception as e:
+        logger.info("Enum migration skipped (fresh DB or already done): %s", e)
+
+    # 2. Column migration — can be in a transaction
     async with engine.begin() as conn:
+        try:
+            await conn.execute(text(
+                "ALTER TABLE facilities ALTER COLUMN lat DROP NOT NULL"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE facilities ALTER COLUMN lng DROP NOT NULL"
+            ))
+        except Exception:
+            pass  # Table doesn't exist yet (fresh DB) — create_all handles it
+
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ready")
 
@@ -72,6 +94,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    await shutdown_browser()
     worker_task.cancel()
     try:
         await worker_task

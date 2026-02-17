@@ -27,6 +27,7 @@ class Base(DeclarativeBase):
 # --- Enums ---
 
 class ScanStatus(str, enum.Enum):
+    pending = "pending"
     queued = "queued"
     running_osm = "running_osm"
     running_validate = "running_validate"
@@ -59,8 +60,8 @@ class Facility(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(Text, nullable=False)
-    lat = Column(Float, nullable=False)
-    lng = Column(Float, nullable=False)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     address = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
