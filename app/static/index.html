@@ -704,8 +704,7 @@ function parseRawCoords(str) {
 }
 
 async function geocodeCensus(str) {
-  const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(str)}&benchmark=Public_AR_Current&format=json`;
-  const res = await fetch(url);
+  const res = await fetch(`/api/geocode/census?address=${encodeURIComponent(str)}`);
   if (!res.ok) throw new Error(`Census Geocoder returned ${res.status}`);
   const data = await res.json();
   const matches = data?.result?.addressMatches;

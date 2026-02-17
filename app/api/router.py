@@ -2,7 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, Depends
+import httpx
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +68,18 @@ async def update_settings(req: SettingsUpdate, db: AsyncSession = Depends(get_db
 
     await db.commit()
     return await get_settings(db)
+
+
+# --- Census Geocoder proxy (avoids CORS) ---
+
+@api_router.get("/geocode/census")
+async def geocode_census(address: str = Query(...)):
+    """Proxy to US Census Geocoder to avoid browser CORS restrictions."""
+    url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+    params = {"address": address, "benchmark": "Public_AR_Current", "format": "json"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(url, params=params)
+    return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
 
 # --- Health check (at root, not /api) ---
