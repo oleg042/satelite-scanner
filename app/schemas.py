@@ -56,6 +56,8 @@ class ScanResponse(BaseModel):
     facility_id: UUID
     facility_name: str = ""
     facility_address: Optional[str] = None
+    facility_lat: Optional[float] = None
+    facility_lng: Optional[float] = None
     status: str
     method: Optional[str] = None
     zoom: Optional[int] = None

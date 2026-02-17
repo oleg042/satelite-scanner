@@ -157,6 +157,7 @@
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_validated">AI</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
+              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Coords</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Map</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="duration">Duration</th>
@@ -411,6 +412,19 @@ function fmtMethod(m) {
   return m.replace(/_/g, ' ');
 }
 
+function fmtCoords(scan) {
+  if (scan.facility_lat == null || scan.facility_lng == null) return '-';
+  return `<div class="leading-tight"><div>${scan.facility_lat.toFixed(6)}</div><div>${scan.facility_lng.toFixed(6)}</div></div>`;
+}
+
+function fmtType(t) {
+  if (!t) return '-';
+  const parts = t.split(/[\s/]+/);
+  if (parts.length <= 2) return esc(t);
+  const mid = Math.ceil(parts.length / 2);
+  return `<div class="leading-tight"><div>${esc(parts.slice(0, mid).join(' '))}</div><div>${esc(parts.slice(mid).join(' '))}</div></div>`;
+}
+
 // --- Sorting ---
 function getSortValue(scan, field, idx) {
   switch (field) {
@@ -473,14 +487,15 @@ function renderTable() {
       <td class="px-3 py-2">${statusBadge(scan.status)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
       <td class="px-3 py-2 text-center">${fmtAI(scan)}</td>
-      <td class="px-3 py-2 text-gray-400">${esc(scan.ai_facility_type || '-')}</td>
+      <td class="px-3 py-2 text-gray-400 max-w-[10rem]">${fmtType(scan.ai_facility_type)}</td>
+      <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtMapLink(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDuration(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="12" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="13" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
@@ -616,6 +631,10 @@ async function toggleRow(scanId) {
 function updateDeleteBtn() {
   const btn = document.getElementById('delete-btn');
   const count = S.selected.size;
+  // Restore inner HTML if it was replaced (e.g. by 'Deleting...' text)
+  if (!document.getElementById('delete-count')) {
+    btn.innerHTML = 'Delete Selected (<span id="delete-count">0</span>)';
+  }
   document.getElementById('delete-count').textContent = count;
   btn.disabled = count === 0;
   btn.classList.toggle('hidden', count === 0);
@@ -787,9 +806,11 @@ async function geocodeCensus(str) {
 async function geocodeAddress(str, facilityName = '') {
   // Step 1: Try Google Maps search (name + address → precise place resolution)
   if (facilityName) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
     try {
       const gParams = new URLSearchParams({ name: facilityName, address: str });
-      const gRes = await fetch(`/api/geocode/google-search?${gParams}`);
+      const gRes = await fetch(`/api/geocode/google-search?${gParams}`, { signal: controller.signal });
       if (gRes.ok) {
         const gData = await gRes.json();
         if (gData.results && gData.results.length > 0) {
@@ -801,7 +822,10 @@ async function geocodeAddress(str, facilityName = '') {
         if (gData.error) console.warn('Google Maps geocode:', gData.error);
       }
     } catch (e) {
-      console.warn('Google Maps geocode failed:', e);
+      if (e.name === 'AbortError') console.warn('Google Maps geocode timed out after 25s');
+      else console.warn('Google Maps geocode failed:', e);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
