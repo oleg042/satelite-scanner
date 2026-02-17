@@ -703,6 +703,17 @@ function parseRawCoords(str) {
   return { lat, lng };
 }
 
+async function geocodeCensus(str) {
+  const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(str)}&benchmark=Public_AR_Current&format=json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Census Geocoder returned ${res.status}`);
+  const data = await res.json();
+  const matches = data?.result?.addressMatches;
+  if (!matches || matches.length === 0) throw new Error('No results found for this address');
+  const m = matches[0];
+  return [{ lat: m.coordinates.y, lng: m.coordinates.x, display_name: m.matchedAddress }];
+}
+
 async function geocodeAddress(str) {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(str)}&format=json&limit=3`;
   const res = await fetch(url, {
@@ -710,7 +721,7 @@ async function geocodeAddress(str) {
   });
   if (!res.ok) throw new Error(`Nominatim returned ${res.status}`);
   const data = await res.json();
-  if (!data || data.length === 0) throw new Error('No results found for this address');
+  if (!data || data.length === 0) return geocodeCensus(str);
   return data.map(r => ({
     lat: parseFloat(r.lat),
     lng: parseFloat(r.lon),
