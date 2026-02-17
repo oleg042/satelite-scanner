@@ -120,6 +120,10 @@
         &#8635; Refresh
       </button>
       <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
+      <button id="delete-btn" disabled
+        class="bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
+        Delete Selected (<span id="delete-count">0</span>)
+      </button>
     </div>
 
     <!-- Table (scrollable) -->
@@ -128,6 +132,7 @@
         <table class="w-full text-sm">
           <thead class="sticky top-0 bg-gray-900 z-10">
             <tr class="border-b border-gray-800 text-gray-400 text-left">
+              <th class="px-3 py-2.5 w-8"><input id="select-all" type="checkbox" class="rounded bg-gray-800 border-gray-600 cursor-pointer"></th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
@@ -252,6 +257,7 @@ const S = {
   limit: 50,
   expanded: {},
   expandedOpen: {},
+  selected: new Set(),
   pollTimer: null,
   currentPage: 'scans',
 };
@@ -398,7 +404,9 @@ function renderTable() {
   sorted.forEach((scan, i) => {
     const rowNum = S.offset + i + 1;
     const isOpen = S.expandedOpen[scan.id];
+    const checked = S.selected.has(scan.id) ? 'checked' : '';
     html += `<tr class="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition" data-id="${scan.id}">
+      <td class="px-3 py-2" onclick="event.stopPropagation()"><input type="checkbox" class="row-check rounded bg-gray-800 border-gray-600 cursor-pointer" data-id="${scan.id}" ${checked}></td>
       <td class="px-3 py-2 text-gray-500">${rowNum}</td>
       <td class="px-3 py-2 font-medium">${esc(scan.facility_name || '-')}</td>
       <td class="px-3 py-2">${statusBadge(scan.status)}</td>
@@ -410,7 +418,7 @@ function renderTable() {
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="9" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="10" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
@@ -420,6 +428,22 @@ function renderTable() {
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
     row.addEventListener('click', () => toggleRow(row.dataset.id));
   });
+
+  // Checkbox handlers
+  tbody.querySelectorAll('.row-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) S.selected.add(cb.dataset.id);
+      else S.selected.delete(cb.dataset.id);
+      updateDeleteBtn();
+    });
+  });
+
+  // Sync select-all state
+  const selectAll = document.getElementById('select-all');
+  if (selectAll) {
+    selectAll.checked = sorted.length > 0 && sorted.every(s => S.selected.has(s.id));
+    selectAll.indeterminate = sorted.some(s => S.selected.has(s.id)) && !selectAll.checked;
+  }
 
   document.getElementById('scan-count').textContent = `${sorted.length} scan${sorted.length !== 1 ? 's' : ''}`;
 
@@ -518,6 +542,40 @@ async function toggleRow(scanId) {
     }
   }
   renderTable();
+}
+
+// --- Selection / Delete ---
+function updateDeleteBtn() {
+  const btn = document.getElementById('delete-btn');
+  const count = S.selected.size;
+  document.getElementById('delete-count').textContent = count;
+  btn.disabled = count === 0;
+  btn.classList.toggle('hidden', count === 0);
+}
+
+async function deleteSelected() {
+  const ids = [...S.selected];
+  if (ids.length === 0) return;
+  if (!confirm(`Delete ${ids.length} scan${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+  const btn = document.getElementById('delete-btn');
+  btn.disabled = true;
+  btn.textContent = 'Deleting...';
+
+  try {
+    const res = await api('DELETE', '/api/scans', { scan_ids: ids });
+    toast(`Deleted ${res.deleted} scan${res.deleted !== 1 ? 's' : ''}`);
+    S.selected.clear();
+    updateDeleteBtn();
+    fetchScans();
+    fetchHealth();
+  } catch (e) {
+    toast('Delete failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Delete Selected (<span id="delete-count">0</span>)';
+    updateDeleteBtn();
+  }
 }
 
 // --- Fetch scans ---
@@ -653,6 +711,20 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
   document.getElementById('filter-method').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+
+  // Select all checkbox
+  document.getElementById('select-all').addEventListener('change', (e) => {
+    const checked = e.target.checked;
+    S.scans.forEach(s => {
+      if (checked) S.selected.add(s.id);
+      else S.selected.delete(s.id);
+    });
+    updateDeleteBtn();
+    renderTable();
+  });
+
+  // Delete button
+  document.getElementById('delete-btn').addEventListener('click', deleteSelected);
 
   // Refresh
   document.getElementById('refresh-btn').addEventListener('click', fetchScans);

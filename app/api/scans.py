@@ -1,14 +1,14 @@
-"""Scan endpoints — submit, status, list."""
+"""Scan endpoints — submit, status, list, delete."""
 
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Facility, Scan, ScanStatus, ScanStep
+from app.models import Facility, Scan, ScanStatus, ScanStep, Screenshot
 from app.schemas import (
     BatchScanRequest,
     ScanRequest,
@@ -166,6 +166,26 @@ async def list_scans(
     result = await db.execute(q)
     rows = result.all()
     return [_scan_to_response(row[0], facility_name=row[1] or "") for row in rows]
+
+
+@router.delete("/scans", status_code=200)
+async def delete_scans(
+    scan_ids: list[UUID] = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete scans and all related records (screenshots, steps)."""
+    if not scan_ids:
+        raise HTTPException(status_code=400, detail="No scan IDs provided")
+    if len(scan_ids) > 200:
+        raise HTTPException(status_code=400, detail="Max 200 scans per delete")
+
+    # Delete child records first (no cascade on FK)
+    await db.execute(delete(Screenshot).where(Screenshot.scan_id.in_(scan_ids)))
+    await db.execute(delete(ScanStep).where(ScanStep.scan_id.in_(scan_ids)))
+    result = await db.execute(delete(Scan).where(Scan.id.in_(scan_ids)))
+    await db.commit()
+
+    return {"deleted": result.rowcount}
 
 
 def _parse_json_field(text: str | None) -> dict | None:
