@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Setting
 from app.schemas import HealthResponse, SettingsResponse, SettingsUpdate
+from app.config import settings as app_settings
 from app.scanner.vision import DEFAULT_VALIDATION_PROMPT, _load_default_boundary_prompt
 from app.worker import scan_queue
 
@@ -206,4 +207,4 @@ health_router = APIRouter()
 
 @health_router.get("/health", response_model=HealthResponse)
 async def health_check():
-    return HealthResponse(status="ok", queue_size=scan_queue.qsize())
+    return HealthResponse(status="ok", queue_size=scan_queue.qsize(), workers=app_settings.worker_concurrency)

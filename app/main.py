@@ -16,7 +16,7 @@ from app.api.router import api_router, health_router
 from app.config import settings
 from app.database import engine
 from app.models import Base, Setting
-from app.worker import worker_loop
+from app.worker import worker_pool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     await _init_db()
 
     # Start background worker
-    worker_task = asyncio.create_task(worker_loop())
+    worker_task = asyncio.create_task(worker_pool())
     logger.info("Background worker started")
 
     yield

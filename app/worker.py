@@ -1,9 +1,10 @@
-"""Background worker using asyncio.Queue for sequential scan processing."""
+"""Background worker pool using asyncio.Queue for concurrent scan processing."""
 
 import asyncio
 import logging
 from uuid import UUID
 
+from app.config import settings
 from app.database import async_session
 from app.scanner.pipeline import run_pipeline
 
@@ -19,16 +20,24 @@ async def enqueue_scan(scan_id: UUID, facility_name: str, lat: float, lng: float
     logger.info("Enqueued scan %s (%s) — queue size: %d", scan_id, facility_name, scan_queue.qsize())
 
 
-async def worker_loop():
-    """Process scans sequentially from the queue (rate limits require this)."""
-    logger.info("Background worker started")
+async def _worker(worker_id: int):
+    """Single worker coroutine — pulls jobs from the shared queue."""
+    logger.info("Worker %d ready", worker_id)
     while True:
         scan_id, facility_name, lat, lng = await scan_queue.get()
-        logger.info("Processing scan %s (%s)...", scan_id, facility_name)
+        logger.info("[W%d] Processing scan %s (%s)...", worker_id, scan_id, facility_name)
         try:
             async with async_session() as db:
                 await run_pipeline(scan_id, facility_name, lat, lng, db)
         except Exception:
-            logger.exception("Worker error for scan %s", scan_id)
+            logger.exception("[W%d] Worker error for scan %s", worker_id, scan_id)
         finally:
             scan_queue.task_done()
+
+
+async def worker_pool():
+    """Spawn N concurrent workers pulling from the same queue."""
+    n = settings.worker_concurrency
+    logger.info("Starting worker pool with %d concurrent workers", n)
+    tasks = [asyncio.create_task(_worker(i)) for i in range(n)]
+    await asyncio.gather(*tasks)

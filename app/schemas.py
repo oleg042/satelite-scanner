@@ -158,3 +158,4 @@ class ScanTraceResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     queue_size: int = 0
+    workers: int = 1

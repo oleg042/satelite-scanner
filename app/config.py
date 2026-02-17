@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     default_buffer_m: int = 50
     overview_zoom: int = 19
     tile_delay_s: float = 0.05
+    worker_concurrency: int = 3
     search_radius_m: int = 200
     fallback_radius_m: int = 75
     overview_radius_m: int = 400
