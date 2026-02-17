@@ -779,7 +779,24 @@ async function geocodeCensus(str) {
   return [{ lat: m.coordinates.y, lng: m.coordinates.x, display_name: m.matchedAddress }];
 }
 
-async function geocodeAddress(str) {
+async function geocodeAddress(str, facilityName = '') {
+  // Step 1: Try Google Maps search (name + address → precise place resolution)
+  if (facilityName) {
+    try {
+      const gParams = new URLSearchParams({ name: facilityName, address: str });
+      const gRes = await fetch(`/api/geocode/google-search?${gParams}`);
+      if (gRes.ok) {
+        const gData = await gRes.json();
+        if (gData.results && gData.results.length > 0) {
+          return gData.results.map(r => ({
+            lat: r.lat, lng: r.lng, display_name: r.display_name,
+          }));
+        }
+      }
+    } catch {}
+  }
+
+  // Step 2+3: Census + Nominatim in parallel
   const nominatimP = fetch(`/api/geocode/nominatim?address=${encodeURIComponent(str)}`)
     .then(r => r.ok ? r.json() : [])
     .then(data => (data || []).map(r => ({
@@ -823,9 +840,10 @@ async function resolveLocation(input) {
   const rawCoords = parseRawCoords(trimmed);
   if (rawCoords) return { ...rawCoords, display_name: `Raw coordinates`, source: 'raw_coords' };
 
-  // 3. Address geocoding via Nominatim
-  const results = await geocodeAddress(trimmed);
-  return { ...results[0], source: 'nominatim', alternatives: results.slice(1) };
+  // 3. Address geocoding (Google Maps → Census → Nominatim)
+  const facilityName = document.getElementById('sf-name')?.value?.trim() || '';
+  const results = await geocodeAddress(trimmed, facilityName);
+  return { ...results[0], source: 'geocoded', alternatives: results.slice(1) };
 }
 
 function showResolveResult(result) {

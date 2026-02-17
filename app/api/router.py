@@ -1,5 +1,6 @@
 """API router — aggregates all endpoint modules."""
 
+import asyncio
 import logging
 
 import httpx
@@ -92,6 +93,107 @@ async def geocode_census(address: str = Query(...)):
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(url, params=params)
     return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+
+@api_router.get("/geocode/google-search")
+async def geocode_google_search(name: str = Query(""), address: str = Query("")):
+    """Resolve facility coordinates via Google Maps headless browser.
+
+    Opens a Google Maps search URL, waits for JS to resolve it to a place
+    with coordinates, then parses the final URL. Returns empty results when
+    Playwright is unavailable or Google can't resolve to a specific place.
+    """
+    query = " ".join(filter(None, [name.strip(), address.strip()]))
+    if not query:
+        return JSONResponse(content={"results": [], "error": "No query"})
+
+    try:
+        result = await asyncio.to_thread(_google_search_resolve, query)
+        if result:
+            return JSONResponse(content={"results": [result]})
+        return JSONResponse(content={"results": []})
+    except Exception as e:
+        logger.warning("Google Maps geocode failed: %s", e)
+        return JSONResponse(content={"results": [], "error": str(e)})
+
+
+def _google_search_resolve(query: str) -> dict | None:
+    """Use headless browser to resolve a Google Maps search to coordinates."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.warning("Playwright not installed — Google Maps geocoding unavailable")
+        return None
+
+    import re
+    import urllib.parse
+
+    search_url = f"https://www.google.com/maps/search/{urllib.parse.quote(query)}"
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                locale="en-US",
+            )
+            # Skip Google's cookie consent page
+            context.add_cookies([{
+                "name": "SOCS",
+                "value": "CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjMwODI5LjA3X3AxGgJlbiADGgYIgJa9pwY",
+                "domain": ".google.com", "path": "/",
+            }, {
+                "name": "CONSENT",
+                "value": "YES+cb.20231229-04-p0.en+FX+411",
+                "domain": ".google.com", "path": "/",
+            }])
+
+            page = context.new_page()
+            page.goto(search_url, wait_until="domcontentloaded")
+
+            # Wait for URL to contain @ (coordinates resolved by Google JS)
+            try:
+                page.wait_for_url(re.compile(r"@-?\d+\.\d+,-?\d+\.\d+"), timeout=15000)
+            except Exception:
+                logger.info("Google Maps did not resolve coordinates for: %s", query)
+                return None
+
+            final_url = page.url
+        finally:
+            browser.close()
+
+    is_place = "/place/" in final_url
+
+    # Parse coordinates: @42.38,-83.22,17z or @42.38,-83.22,719m
+    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+),(\d+(?:\.\d+)?)(z|m)", final_url)
+    if not m:
+        return None
+
+    lat = float(m.group(1))
+    lng = float(m.group(2))
+    zoom_val = float(m.group(3))
+    zoom_unit = m.group(4)
+
+    # Determine if this is a precise match
+    # z format: zoom level (17z = close, 13z = far) — 15+ is precise
+    # m format: distance in meters (719m = close, 5745m = far) — <3000 is precise
+    is_precise = (zoom_unit == "z" and zoom_val >= 15) or (zoom_unit == "m" and zoom_val < 3000)
+
+    if is_place and is_precise:
+        return {
+            "lat": lat,
+            "lng": lng,
+            "display_name": f"Google Maps: {query}",
+            "confidence": "high",
+            "zoom": f"{zoom_val}{zoom_unit}",
+            "source": "google_maps_search",
+        }
+
+    # Not precise enough — log and skip
+    logger.info("Google Maps: %s match (%s%.0f%s) for: %s",
+                "place" if is_place else "search", "" if is_place else "no /place/, ",
+                zoom_val, zoom_unit, query)
+    return None
 
 
 # --- Health check (at root, not /api) ---
