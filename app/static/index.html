@@ -61,28 +61,45 @@
     <div class="border-b border-gray-800 bg-gray-900/50 px-6 py-4">
       <div class="flex items-start gap-6">
         <!-- New Scan form (inline) -->
-        <form id="scan-form" class="flex items-end gap-3 flex-wrap">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Facility Name</label>
-            <input id="sf-name" type="text" placeholder="Acme Steel" required
-              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-44 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+        <form id="scan-form" class="space-y-3 max-w-lg">
+          <div class="flex items-end gap-3">
+            <div class="flex-1">
+              <label class="block text-xs text-gray-500 mb-1">Facility Name</label>
+              <input id="sf-name" type="text" placeholder="Amerequip Corporation" required
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            </div>
           </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Latitude</label>
-            <input id="sf-lat" type="number" step="any" placeholder="41.0534" required
-              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+          <div class="flex items-end gap-2">
+            <div class="flex-1">
+              <label class="block text-xs text-gray-500 mb-1">Address / Location</label>
+              <input id="sf-location" type="text" placeholder="123 Main St, City, ST  or  Google Maps URL  or  41.05, -80.67" required
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            </div>
+            <button id="sf-resolve" type="button"
+              class="bg-gray-700 hover:bg-gray-600 text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
+              Resolve
+            </button>
           </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Longitude</label>
-            <input id="sf-lng" type="number" step="any" placeholder="-80.6753" required
-              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+          <!-- Resolve result area -->
+          <div id="sf-resolve-result" class="hidden">
+            <!-- Filled dynamically by JS -->
           </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Address</label>
-            <input id="sf-addr" type="text" placeholder="Optional"
-              class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-44 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+          <!-- Manual override inputs (hidden by default) -->
+          <div id="sf-manual-override" class="hidden flex items-end gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Latitude</label>
+              <input id="sf-lat" type="number" step="any" placeholder="41.0534"
+                class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-32 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Longitude</label>
+              <input id="sf-lng" type="number" step="any" placeholder="-80.6753"
+                class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-32 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            </div>
+            <button type="button" onclick="applyManualCoords()" class="bg-gray-700 hover:bg-gray-600 text-white font-medium rounded px-3 py-1.5 text-sm transition">Apply</button>
+            <button type="button" onclick="cancelManualOverride()" class="text-gray-500 hover:text-gray-300 text-sm transition">Cancel</button>
           </div>
-          <button id="sf-submit" type="submit"
+          <button id="sf-submit" type="submit" disabled
             class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
             Submit Scan
           </button>
@@ -260,6 +277,8 @@ const S = {
   selected: new Set(),
   pollTimer: null,
   currentPage: 'scans',
+  // Geocoding resolved state
+  resolved: null, // { lat, lng, display_name, source }
 };
 
 // --- Router ---
@@ -665,25 +684,184 @@ async function saveSettings(e) {
   }
 }
 
+// --- Geocoding ---
+function parseGoogleMapsUrl(str) {
+  const match = str.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (!match) return null;
+  const lat = parseFloat(match[1]);
+  const lng = parseFloat(match[2]);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function parseRawCoords(str) {
+  const match = str.trim().match(/^(-?\d+\.?\d*)\s*[,\s]\s*(-?\d+\.?\d*)$/);
+  if (!match) return null;
+  const lat = parseFloat(match[1]);
+  const lng = parseFloat(match[2]);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+async function geocodeAddress(str) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(str)}&format=json&limit=3`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'SatelliteScanner/1.0' }
+  });
+  if (!res.ok) throw new Error(`Nominatim returned ${res.status}`);
+  const data = await res.json();
+  if (!data || data.length === 0) throw new Error('No results found for this address');
+  return data.map(r => ({
+    lat: parseFloat(r.lat),
+    lng: parseFloat(r.lon),
+    display_name: r.display_name,
+  }));
+}
+
+async function resolveLocation(input) {
+  const trimmed = input.trim();
+  if (!trimmed) throw new Error('Please enter an address, coordinates, or Google Maps URL');
+
+  // 1. Google Maps URL
+  if (trimmed.includes('google.com/maps') || trimmed.includes('goo.gl/maps')) {
+    const coords = parseGoogleMapsUrl(trimmed);
+    if (coords) return { ...coords, display_name: 'Extracted from Google Maps URL', source: 'google_maps' };
+    throw new Error('Could not extract coordinates from Google Maps URL');
+  }
+
+  // 2. Raw coordinates
+  const rawCoords = parseRawCoords(trimmed);
+  if (rawCoords) return { ...rawCoords, display_name: `Raw coordinates`, source: 'raw_coords' };
+
+  // 3. Address geocoding via Nominatim
+  const results = await geocodeAddress(trimmed);
+  return { ...results[0], source: 'nominatim', alternatives: results.slice(1) };
+}
+
+function showResolveResult(result) {
+  S.resolved = result;
+  const container = document.getElementById('sf-resolve-result');
+  const alternatives = result.alternatives || [];
+
+  let html = `<div class="bg-gray-800/50 border border-gray-700 rounded px-3 py-2 text-sm space-y-1">
+    <div class="flex items-center gap-2">
+      <span class="text-green-400">&#10003;</span>
+      <span class="text-gray-200 font-medium">${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}</span>
+      <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 ml-auto">Edit</button>
+    </div>
+    <div class="text-xs text-gray-400 truncate" title="${esc(result.display_name)}">${esc(result.display_name)}</div>`;
+
+  if (alternatives.length > 0) {
+    html += `<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-300">Other results (${alternatives.length})</summary><div class="mt-1 space-y-1">`;
+    alternatives.forEach((alt, i) => {
+      html += `<div class="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 cursor-pointer" onclick="pickAlternative(${i})">
+        <span class="text-gray-600">&bull;</span>
+        <span>${alt.lat.toFixed(6)}, ${alt.lng.toFixed(6)}</span>
+        <span class="truncate text-gray-500">${esc(alt.display_name)}</span>
+      </div>`;
+    });
+    html += '</div></details>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  container.classList.remove('hidden');
+  document.getElementById('sf-manual-override').classList.add('hidden');
+  document.getElementById('sf-submit').disabled = false;
+}
+
+function pickAlternative(idx) {
+  const alt = S.resolved.alternatives[idx];
+  if (!alt) return;
+  const oldAlts = [{ lat: S.resolved.lat, lng: S.resolved.lng, display_name: S.resolved.display_name },
+    ...S.resolved.alternatives.filter((_, i) => i !== idx)];
+  showResolveResult({ ...alt, source: 'nominatim', alternatives: oldAlts });
+}
+
+function showResolveError(msg) {
+  S.resolved = null;
+  const container = document.getElementById('sf-resolve-result');
+  container.innerHTML = `<div class="bg-red-900/30 border border-red-800 rounded px-3 py-2 text-sm flex items-center gap-2">
+    <span class="text-red-400">&#10007;</span>
+    <span class="text-red-300">${esc(msg)}</span>
+    <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 ml-auto">Enter manually</button>
+  </div>`;
+  container.classList.remove('hidden');
+  document.getElementById('sf-submit').disabled = true;
+}
+
+function showManualOverride() {
+  const override = document.getElementById('sf-manual-override');
+  override.classList.remove('hidden');
+  if (S.resolved) {
+    document.getElementById('sf-lat').value = S.resolved.lat;
+    document.getElementById('sf-lng').value = S.resolved.lng;
+  }
+}
+
+function applyManualCoords() {
+  const lat = parseFloat(document.getElementById('sf-lat').value);
+  const lng = parseFloat(document.getElementById('sf-lng').value);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    toast('Invalid coordinates. Lat: -90 to 90, Lng: -180 to 180', 'error');
+    return;
+  }
+  showResolveResult({ lat, lng, display_name: 'Manual entry', source: 'manual' });
+}
+
+function cancelManualOverride() {
+  document.getElementById('sf-manual-override').classList.add('hidden');
+}
+
+async function handleResolve() {
+  const input = document.getElementById('sf-location').value;
+  const btn = document.getElementById('sf-resolve');
+  btn.disabled = true;
+  btn.textContent = 'Resolving...';
+  try {
+    const result = await resolveLocation(input);
+    showResolveResult(result);
+  } catch (err) {
+    showResolveError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Resolve';
+  }
+}
+
+function resetResolveState() {
+  S.resolved = null;
+  document.getElementById('sf-resolve-result').classList.add('hidden');
+  document.getElementById('sf-resolve-result').innerHTML = '';
+  document.getElementById('sf-manual-override').classList.add('hidden');
+  document.getElementById('sf-submit').disabled = true;
+}
+
 // --- Scan form ---
 async function submitScan(e) {
   e.preventDefault();
+  if (!S.resolved) {
+    toast('Please resolve a location first', 'error');
+    return;
+  }
+
   const btn = document.getElementById('sf-submit');
   btn.disabled = true;
   btn.textContent = 'Submitting...';
 
   const body = {
     name: document.getElementById('sf-name').value.trim(),
-    lat: parseFloat(document.getElementById('sf-lat').value),
-    lng: parseFloat(document.getElementById('sf-lng').value),
+    lat: S.resolved.lat,
+    lng: S.resolved.lng,
   };
-  const addr = document.getElementById('sf-addr').value.trim();
-  if (addr) body.address = addr;
+  const addr = document.getElementById('sf-location').value.trim();
+  if (addr && S.resolved.source !== 'raw_coords') body.address = addr;
 
   try {
     await api('POST', '/api/scan', body);
     toast(`Scan queued for ${body.name}`);
     document.getElementById('scan-form').reset();
+    resetResolveState();
     S.offset = 0;
     fetchScans();
     fetchHealth();
@@ -699,6 +877,14 @@ async function submitScan(e) {
 document.addEventListener('DOMContentLoaded', () => {
   // Scan form
   document.getElementById('scan-form').addEventListener('submit', submitScan);
+  document.getElementById('sf-resolve').addEventListener('click', handleResolve);
+  document.getElementById('sf-location').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleResolve(); }
+  });
+  // Reset resolved state when location input changes
+  document.getElementById('sf-location').addEventListener('input', () => {
+    if (S.resolved) resetResolveState();
+  });
 
   // Settings save
   document.getElementById('settings-form').addEventListener('submit', saveSettings);
