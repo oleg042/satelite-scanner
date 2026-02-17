@@ -1,0 +1,327 @@
+"""Waterfall pipeline orchestrator.
+
+Flow:
+  1. OSM CHECK → find building footprint
+  2. AI VALIDATION → verify OSM bbox is complete
+  3. AI VISION FALLBACK → detect boundary from scratch
+  4. TILING → capture high-res imagery
+  5. DONE
+"""
+
+import logging
+import os
+import re
+import time
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.models import Scan, ScanMethod, ScanStatus, Screenshot, ScreenshotType, Setting
+from app.scanner.cache import TileCache
+from app.scanner.geo import (
+    M_PER_DEG_LAT,
+    bbox_add_buffer,
+    bbox_dimensions_m,
+    meters_per_deg_lng,
+    pixel_to_latlng,
+)
+from app.scanner.osm import (
+    find_target_building,
+    find_target_landuse,
+    query_osm_buildings,
+    query_osm_landuse,
+)
+from app.scanner.tiles import capture_area, crop_to_bbox
+from app.scanner.vision import detect_facility_boundary, validate_osm_bbox
+
+logger = logging.getLogger(__name__)
+
+
+async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
+    """Get a setting value from the database."""
+    result = await db.execute(select(Setting.value).where(Setting.key == key))
+    row = result.scalar_one_or_none()
+    return row if row is not None else default
+
+
+async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
+    """Resolve scan config: per-scan overrides > DB settings > env defaults."""
+    api_key = await _get_setting(db, "openai_api_key", settings.openai_api_key)
+    validation_model = await _get_setting(db, "validation_model", "gpt-4o-mini")
+    boundary_model = await _get_setting(db, "boundary_model", "gpt-4o")
+    default_zoom = int(await _get_setting(db, "default_zoom", str(settings.default_zoom)))
+    default_buffer = int(await _get_setting(db, "default_buffer_m", str(settings.default_buffer_m)))
+    overview_zoom = int(await _get_setting(db, "overview_zoom", str(settings.overview_zoom)))
+    validation_prompt = await _get_setting(db, "validation_prompt", "")
+    boundary_prompt = await _get_setting(db, "boundary_prompt", "")
+
+    return {
+        "api_key": api_key,
+        "validation_model": validation_model,
+        "boundary_model": boundary_model,
+        "zoom": scan.zoom or default_zoom,
+        "buffer_m": scan.buffer_m or default_buffer,
+        "overview_zoom": overview_zoom,
+        "validation_prompt": validation_prompt,
+        "boundary_prompt": boundary_prompt,
+    }
+
+
+def _safe_name(name: str) -> str:
+    return re.sub(r"[^\w\-]", "_", name).strip("_")
+
+
+def _save_image(image, name: str, suffix: str, zoom: int) -> str:
+    """Save image to volume, return relative path."""
+    safe = _safe_name(name)
+    rel_dir = os.path.join("screenshots", safe)
+    abs_dir = os.path.join(settings.volume_path, rel_dir)
+    os.makedirs(abs_dir, exist_ok=True)
+
+    filename = f"{safe}_{suffix}_z{zoom}.png"
+    abs_path = os.path.join(abs_dir, filename)
+    image.save(abs_path)
+
+    rel_path = os.path.join(rel_dir, filename)
+    return rel_path, filename, abs_path
+
+
+async def _record_screenshot(
+    db: AsyncSession, scan_id, screenshot_type: ScreenshotType,
+    filename: str, file_path: str, abs_path: str, zoom: int,
+    width: int, height: int,
+):
+    """Create screenshot DB record."""
+    file_size = os.path.getsize(abs_path) if os.path.exists(abs_path) else 0
+    ss = Screenshot(
+        scan_id=scan_id,
+        type=screenshot_type,
+        filename=filename,
+        file_path=file_path,
+        file_size_bytes=file_size,
+        width=width,
+        height=height,
+        zoom=zoom,
+    )
+    db.add(ss)
+    await db.commit()
+
+
+async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: AsyncSession):
+    """Execute the full waterfall pipeline for a single scan."""
+    scan = await db.get(Scan, scan_id)
+    if not scan:
+        logger.error("Scan %s not found", scan_id)
+        return
+
+    scan.started_at = datetime.now(timezone.utc)
+    config = await _get_scan_config(db, scan)
+    cache = TileCache()
+    zoom = config["zoom"]
+    buffer_m = config["buffer_m"]
+    overview_zoom = config["overview_zoom"]
+
+    # Will be set by OSM or AI vision
+    final_bbox = None
+    method = None
+
+    try:
+        # ── STEP 1: OSM CHECK ──────────────────────────────────────
+        scan.status = ScanStatus.running_osm
+        await db.commit()
+
+        osm_start = time.monotonic()
+        buildings = await query_osm_buildings(lat, lng, settings.search_radius_m)
+        scan.osm_building_count = len(buildings)
+
+        osm_bbox = None
+        if buildings:
+            building = find_target_building(buildings, lat, lng)
+            if building:
+                scan.osm_building_id = building["id"]
+                lats = [c[0] for c in building["coords"]]
+                lngs = [c[1] for c in building["coords"]]
+                raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
+                osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                method = ScanMethod.osm_building
+
+        scan.osm_duration_ms = int((time.monotonic() - osm_start) * 1000)
+        await db.commit()
+
+        # ── STEP 2: AI VALIDATION (if OSM found something) ────────
+        if osm_bbox and config["api_key"]:
+            scan.status = ScanStatus.running_validate
+            await db.commit()
+
+            ai_start = time.monotonic()
+
+            # Capture overview at OSM bbox for validation
+            ov_img, ov_grid = capture_area(
+                *osm_bbox, overview_zoom, cache=cache, delay=settings.tile_delay_s
+            )
+
+            if ov_img:
+                rel_path, filename, abs_path = _save_image(
+                    ov_img, facility_name, "overview", overview_zoom
+                )
+                await _record_screenshot(
+                    db, scan_id, ScreenshotType.overview,
+                    filename, rel_path, abs_path, overview_zoom,
+                    ov_img.width, ov_img.height,
+                )
+
+                width_m, height_m = bbox_dimensions_m(*osm_bbox)
+
+                validation = validate_osm_bbox(
+                    abs_path, facility_name, lat, lng, width_m, height_m,
+                    api_key=config["api_key"],
+                    model=config["validation_model"],
+                    prompt_template=config["validation_prompt"],
+                )
+
+                if validation:
+                    scan.ai_validated = validation.approved
+                    scan.ai_facility_type = validation.facility_type
+                    scan.ai_notes = validation.notes
+                    if validation.approved:
+                        final_bbox = osm_bbox
+                        logger.info("AI approved OSM bbox")
+                    else:
+                        logger.info("AI rejected OSM bbox: %s", validation.reason)
+                        method = None  # Fall through to vision
+                else:
+                    # Validation failed — still use OSM bbox as best guess
+                    final_bbox = osm_bbox
+                    logger.warning("Validation call failed, using OSM bbox anyway")
+
+                ov_img.close()
+
+            scan.ai_duration_ms = int((time.monotonic() - ai_start) * 1000)
+            await db.commit()
+        elif osm_bbox:
+            # No API key — just use OSM bbox
+            final_bbox = osm_bbox
+
+        # ── STEP 3: AI VISION FALLBACK ─────────────────────────────
+        if final_bbox is None and config["api_key"]:
+            scan.status = ScanStatus.running_vision
+            await db.commit()
+
+            ai_start = time.monotonic()
+
+            # Capture wide overview
+            wide_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.overview_radius_m)
+            ov_img, ov_grid = capture_area(
+                *wide_bbox, overview_zoom, cache=cache, delay=settings.tile_delay_s
+            )
+
+            if ov_img and ov_grid:
+                rel_path, filename, abs_path = _save_image(
+                    ov_img, facility_name, "ai_overview", overview_zoom
+                )
+                await _record_screenshot(
+                    db, scan_id, ScreenshotType.ai_overview,
+                    filename, rel_path, abs_path, overview_zoom,
+                    ov_img.width, ov_img.height,
+                )
+
+                width_m, height_m = bbox_dimensions_m(*wide_bbox)
+
+                boundary = detect_facility_boundary(
+                    abs_path, facility_name, lat, lng, width_m, height_m,
+                    api_key=config["api_key"],
+                    model=config["boundary_model"],
+                    prompt_template=config["boundary_prompt"],
+                )
+
+                if boundary:
+                    scan.ai_confidence = boundary.confidence
+                    scan.ai_facility_type = boundary.facility_type
+                    scan.ai_building_count = boundary.building_count
+                    scan.ai_notes = boundary.notes
+
+                    if boundary.confidence == "low" and boundary.facility_type and \
+                       "office" in boundary.facility_type.lower():
+                        # Skip — not an industrial facility
+                        scan.status = ScanStatus.skipped
+                        scan.method = ScanMethod.skipped
+                        scan.skip_reason = f"AI: {boundary.facility_type} — {boundary.notes}"
+                        scan.completed_at = datetime.now(timezone.utc)
+                        await db.commit()
+                        ov_img.close()
+                        return
+
+                    # Convert pixel bbox to lat/lng
+                    lat1, lng1 = pixel_to_latlng(boundary.left_x, boundary.top_y, ov_grid)
+                    lat2, lng2 = pixel_to_latlng(boundary.right_x, boundary.bottom_y, ov_grid)
+                    raw_bbox = (min(lat1, lat2), min(lng1, lng2), max(lat1, lat2), max(lng1, lng2))
+                    final_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                    method = ScanMethod.ai_vision
+
+                ov_img.close()
+
+            ai_elapsed = int((time.monotonic() - ai_start) * 1000)
+            scan.ai_duration_ms = (scan.ai_duration_ms or 0) + ai_elapsed
+            await db.commit()
+
+        # ── FALLBACK: radius around point ──────────────────────────
+        if final_bbox is None:
+            final_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.fallback_radius_m)
+            method = ScanMethod.fallback_radius
+            logger.info("Using fallback radius of %dm", settings.fallback_radius_m)
+
+        # Record bbox
+        scan.method = method
+        scan.bbox_min_lat, scan.bbox_min_lng = final_bbox[0], final_bbox[1]
+        scan.bbox_max_lat, scan.bbox_max_lng = final_bbox[2], final_bbox[3]
+        width_m, height_m = bbox_dimensions_m(*final_bbox)
+        scan.bbox_width_m = width_m
+        scan.bbox_height_m = height_m
+        await db.commit()
+
+        # ── STEP 4: TILING ─────────────────────────────────────────
+        scan.status = ScanStatus.running_tiling
+        await db.commit()
+
+        tile_start = time.monotonic()
+        detail_img, grid_info = capture_area(
+            *final_bbox, zoom, cache=cache, delay=settings.tile_delay_s
+        )
+
+        if detail_img and grid_info:
+            scan.tile_count = grid_info["total"]
+            scan.tiles_downloaded = grid_info["downloaded"]
+
+            # Crop to exact bounds
+            cropped = crop_to_bbox(detail_img, *final_bbox, grid_info)
+            detail_img.close()
+
+            rel_path, filename, abs_path = _save_image(
+                cropped, facility_name, "final", zoom
+            )
+            scan.image_width = cropped.width
+            scan.image_height = cropped.height
+
+            await _record_screenshot(
+                db, scan_id, ScreenshotType.final,
+                filename, rel_path, abs_path, zoom,
+                cropped.width, cropped.height,
+            )
+            cropped.close()
+
+        scan.tile_duration_ms = int((time.monotonic() - tile_start) * 1000)
+
+        # ── STEP 5: DONE ──────────────────────────────────────────
+        scan.status = ScanStatus.completed
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        logger.info("Scan %s completed — method=%s", scan_id, method)
+
+    except Exception as e:
+        logger.exception("Pipeline failed for scan %s", scan_id)
+        scan.status = ScanStatus.failed
+        scan.error_message = str(e)[:1000]
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()

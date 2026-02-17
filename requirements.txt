@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy[asyncio]
+asyncpg
+pydantic-settings
+Pillow>=10.0.0
+httpx
+openai

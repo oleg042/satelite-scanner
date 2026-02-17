@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Data / Volume
+data/
+output/
+
+# Tile cache
+.tile_cache/
+
+# Checkpoints
+.checkpoint_*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old prototype files (extracted into app/scanner/)
+scanner.py
+vision_scanner.py
+capture.py
+capture_tiles.py
+wsl_guardrails.py
+wsl_preflight.sh
+.wslconfig.example
+README_guardrails.md
+=10.0.0
