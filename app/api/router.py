@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Setting
 from app.schemas import HealthResponse, SettingsResponse, SettingsUpdate
+from app.scanner.vision import DEFAULT_VALIDATION_PROMPT, _load_default_boundary_prompt
 from app.worker import scan_queue
 
 from app.api.facilities import router as facilities_router
@@ -48,8 +49,8 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         default_zoom=settings_dict.get("default_zoom", ""),
         default_buffer_m=settings_dict.get("default_buffer_m", ""),
         overview_zoom=settings_dict.get("overview_zoom", ""),
-        validation_prompt=settings_dict.get("validation_prompt", ""),
-        boundary_prompt=settings_dict.get("boundary_prompt", ""),
+        validation_prompt=settings_dict.get("validation_prompt", "") or DEFAULT_VALIDATION_PROMPT,
+        boundary_prompt=settings_dict.get("boundary_prompt", "") or _load_default_boundary_prompt(),
     )
 
 

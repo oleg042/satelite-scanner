@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _scan_to_response(scan: Scan, facility_name: str = "", base_url: str = "") -> ScanResponse:
+def _scan_to_response(scan: Scan, facility_name: str = "", facility_address: str | None = None, base_url: str = "") -> ScanResponse:
     """Convert Scan ORM to ScanResponse with screenshot URLs."""
     screenshots = []
     for ss in scan.screenshots:
@@ -43,6 +43,7 @@ def _scan_to_response(scan: Scan, facility_name: str = "", base_url: str = "") -
         id=scan.id,
         facility_id=scan.facility_id,
         facility_name=facility_name,
+        facility_address=facility_address,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
         method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
         zoom=scan.zoom,
@@ -139,7 +140,7 @@ async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     facility = await db.get(Facility, scan.facility_id)
-    return _scan_to_response(scan, facility_name=facility.name if facility else "")
+    return _scan_to_response(scan, facility_name=facility.name if facility else "", facility_address=facility.address if facility else None)
 
 
 @router.get("/scans", response_model=list[ScanResponse])
@@ -152,7 +153,7 @@ async def list_scans(
     db: AsyncSession = Depends(get_db),
 ):
     """List scans with optional filtering and facility name search."""
-    q = select(Scan, Facility.name.label("facility_name")).join(
+    q = select(Scan, Facility.name.label("facility_name"), Facility.address.label("facility_address")).join(
         Facility, Scan.facility_id == Facility.id, isouter=True
     ).order_by(Scan.started_at.desc().nullslast())
 
@@ -166,7 +167,7 @@ async def list_scans(
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
     rows = result.all()
-    return [_scan_to_response(row[0], facility_name=row[1] or "") for row in rows]
+    return [_scan_to_response(row[0], facility_name=row[1] or "", facility_address=row[2]) for row in rows]
 
 
 @router.delete("/scans", status_code=200)

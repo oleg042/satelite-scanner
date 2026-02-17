@@ -152,11 +152,13 @@
               <th class="px-3 py-2.5 w-8"><input id="select-all" type="checkbox" class="rounded bg-gray-800 border-gray-600 cursor-pointer"></th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
+              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_validated">AI</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
+              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Map</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="duration">Duration</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
             </tr>
@@ -254,14 +256,22 @@
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Prompts</h3>
           <div>
-            <label class="block text-sm text-gray-300 mb-1.5">Validation Prompt</label>
-            <textarea id="set-validation-prompt" rows="6" placeholder="Leave blank to use default"
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-sm text-gray-300">Validation Prompt</label>
+              <button type="button" onclick="resetPrompt('validation')"
+                class="text-xs text-gray-500 hover:text-gray-300 transition">Reset to default</button>
+            </div>
+            <textarea id="set-validation-prompt" rows="6"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
             <p class="text-xs text-gray-600 mt-1">Sent with the overview image during OSM bbox validation (step 2). Supports {name}, {lat}, {lng}, {width_m}, {height_m} placeholders.</p>
           </div>
           <div>
-            <label class="block text-sm text-gray-300 mb-1.5">Boundary Detection Prompt</label>
-            <textarea id="set-boundary-prompt" rows="10" placeholder="Leave blank to use default"
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-sm text-gray-300">Boundary Detection Prompt</label>
+              <button type="button" onclick="resetPrompt('boundary')"
+                class="text-xs text-gray-500 hover:text-gray-300 transition">Reset to default</button>
+            </div>
+            <textarea id="set-boundary-prompt" rows="10"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
             <p class="text-xs text-gray-600 mt-1">Sent with the satellite image for facility boundary identification (step 3). Image context is appended automatically.</p>
           </div>
@@ -376,6 +386,20 @@ function fmtBbox(scan) {
   return `${Math.round(scan.bbox_width_m)}x${Math.round(scan.bbox_height_m)}m`;
 }
 
+function fmtSearchLink(scan) {
+  const parts = [scan.facility_name, scan.facility_address].filter(Boolean);
+  if (parts.length === 0) return '-';
+  const q = encodeURIComponent(parts.join(' '));
+  return `<a href="https://www.google.com/maps/search/${q}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300 underline">GMaps</a>`;
+}
+
+function fmtMapLink(scan) {
+  if (scan.bbox_min_lat == null || scan.bbox_max_lat == null) return '-';
+  const lat = ((scan.bbox_min_lat + scan.bbox_max_lat) / 2).toFixed(6);
+  const lng = ((scan.bbox_min_lng + scan.bbox_max_lng) / 2).toFixed(6);
+  return `<a href="https://www.google.com/maps/@${lat},${lng},18z" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300 underline">View</a>`;
+}
+
 function fmtAI(scan) {
   if (scan.ai_validated === true) return '<span class="text-green-400 font-bold">&#10003;</span>';
   if (scan.ai_validated === false) return '<span class="text-red-400 font-bold">&#10007;</span>';
@@ -445,16 +469,18 @@ function renderTable() {
       <td class="px-3 py-2" onclick="event.stopPropagation()"><input type="checkbox" class="row-check rounded bg-gray-800 border-gray-600 cursor-pointer" data-id="${scan.id}" ${checked}></td>
       <td class="px-3 py-2 text-gray-500">${rowNum}</td>
       <td class="px-3 py-2 font-medium">${esc(scan.facility_name || '-')}</td>
+      <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
       <td class="px-3 py-2 text-center">${fmtAI(scan)}</td>
       <td class="px-3 py-2 text-gray-400">${esc(scan.ai_facility_type || '-')}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
+      <td class="px-3 py-2 text-center whitespace-nowrap">${fmtMapLink(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDuration(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="10" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="12" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
@@ -677,6 +703,17 @@ async function loadSettings() {
     document.getElementById('set-validation-prompt').value = s.validation_prompt || '';
     document.getElementById('set-boundary-prompt').value = s.boundary_prompt || '';
   } catch {}
+}
+
+async function resetPrompt(type) {
+  const key = type === 'validation' ? 'validation_prompt' : 'boundary_prompt';
+  try {
+    await api('PUT', '/api/settings', { [key]: '' });
+    toast('Prompt reset to default');
+    loadSettings();
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
 }
 
 async function saveSettings(e) {
