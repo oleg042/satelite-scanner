@@ -36,6 +36,7 @@ def _scan_to_response(scan: Scan, facility_name: str = "", base_url: str = "") -
             width=ss.width,
             height=ss.height,
             zoom=ss.zoom,
+            file_size_bytes=ss.file_size_bytes,
         ))
 
     return ScanResponse(

@@ -486,9 +486,15 @@ function renderDetail(scan) {
   if (scan.screenshots && scan.screenshots.length > 0) {
     html += '<div class="flex flex-wrap gap-3">';
     scan.screenshots.forEach(ss => {
+      const sizeParts = [];
+      if (ss.width && ss.height) sizeParts.push(`${ss.width}×${ss.height}px`);
+      if (ss.file_size_bytes) sizeParts.push(`${(ss.file_size_bytes / 1048576).toFixed(2)} MB`);
+      const sizeStr = sizeParts.length ? ` — ${sizeParts.join(', ')}` : '';
       html += `<div class="text-center">
-        <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain" loading="lazy">
-        <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})</div>
+        <a href="${ss.url}" target="_blank" rel="noopener" title="Open full screenshot">
+          <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
+        </a>
+        <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
       </div>`;
     });
     html += '</div>';
@@ -714,10 +720,7 @@ async function geocodeCensus(str) {
 }
 
 async function geocodeAddress(str) {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(str)}&format=json&limit=3`;
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'SatelliteScanner/1.0' }
-  });
+  const res = await fetch(`/api/geocode/nominatim?address=${encodeURIComponent(str)}`);
   if (!res.ok) throw new Error(`Nominatim returned ${res.status}`);
   const data = await res.json();
   if (!data || data.length === 0) return geocodeCensus(str);

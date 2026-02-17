@@ -46,6 +46,7 @@ class ScreenshotResponse(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     zoom: Optional[int] = None
+    file_size_bytes: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

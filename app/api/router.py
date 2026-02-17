@@ -70,7 +70,18 @@ async def update_settings(req: SettingsUpdate, db: AsyncSession = Depends(get_db
     return await get_settings(db)
 
 
-# --- Census Geocoder proxy (avoids CORS) ---
+# --- Geocoder proxies (avoids CORS, sets proper User-Agent) ---
+
+@api_router.get("/geocode/nominatim")
+async def geocode_nominatim(address: str = Query(...)):
+    """Proxy to Nominatim to avoid CORS preflight and set User-Agent server-side."""
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {"q": address, "format": "json", "limit": "3"}
+    headers = {"User-Agent": "SatelliteScanner/1.0"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(url, params=params, headers=headers)
+    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
 
 @api_router.get("/geocode/census")
 async def geocode_census(address: str = Query(...)):
