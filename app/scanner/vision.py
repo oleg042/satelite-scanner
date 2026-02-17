@@ -49,11 +49,22 @@ def _load_default_boundary_prompt() -> str:
 
 
 @dataclass
+class TokenUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass
 class ValidationResult:
     approved: bool
     reason: str
     facility_type: str
     notes: str
+    raw_response: str = ""
+    prompt_text: str = ""
+    usage: Optional[TokenUsage] = None
 
 
 @dataclass
@@ -66,6 +77,9 @@ class BoundaryResult:
     facility_type: str
     building_count: int
     notes: str
+    raw_response: str = ""
+    prompt_text: str = ""
+    usage: Optional[TokenUsage] = None
 
 
 def _image_to_base64(image_path: str) -> str:
@@ -131,12 +145,23 @@ def validate_osm_bbox(
         )
         text = response.choices[0].message.content.strip()
         logger.info("Validation response: %s", text)
+
+        usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            reasoning_tokens=getattr(response.usage.completion_tokens_details, "reasoning_tokens", 0) or 0,
+            total_tokens=response.usage.total_tokens,
+        )
+
         data = _parse_json_response(text)
         return ValidationResult(
             approved=data.get("approved", False),
             reason=data.get("reason", ""),
             facility_type=data.get("facility_type", ""),
             notes=data.get("notes", ""),
+            raw_response=text,
+            prompt_text=prompt,
+            usage=usage,
         )
     except Exception as e:
         logger.error("Validation API error: %s", e)
@@ -208,6 +233,14 @@ def detect_facility_boundary(
         )
         text = response.choices[0].message.content.strip()
         logger.info("Boundary response: %s", text)
+
+        usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            reasoning_tokens=getattr(response.usage.completion_tokens_details, "reasoning_tokens", 0) or 0,
+            total_tokens=response.usage.total_tokens,
+        )
+
         data = _parse_json_response(text)
         return BoundaryResult(
             top_y=data["top_y"],
@@ -218,6 +251,9 @@ def detect_facility_boundary(
             facility_type=data.get("facility_type", "unknown"),
             building_count=data.get("building_count", 0),
             notes=data.get("notes", ""),
+            raw_response=text,
+            prompt_text=full_prompt,
+            usage=usage,
         )
     except Exception as e:
         logger.error("Boundary detection API error: %s", e)

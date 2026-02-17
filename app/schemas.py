@@ -114,6 +114,44 @@ class SettingsResponse(BaseModel):
     boundary_prompt: str = ""
 
 
+class ScanStepResponse(BaseModel):
+    id: UUID
+    step_number: int
+    step_name: str
+    status: str
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    input_summary: Optional[dict] = None
+    output_summary: Optional[dict] = None
+    decision: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_prompt: Optional[str] = None
+    ai_response_raw: Optional[str] = None
+    ai_tokens_prompt: Optional[int] = None
+    ai_tokens_completion: Optional[int] = None
+    ai_tokens_reasoning: Optional[int] = None
+    ai_tokens_total: Optional[int] = None
+    tile_grid_cols: Optional[int] = None
+    tile_grid_rows: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ScanTraceResponse(BaseModel):
+    scan_id: UUID
+    facility_name: str
+    lat: float
+    lng: float
+    status: str
+    method: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    total_duration_ms: Optional[int] = None
+    total_ai_tokens: Optional[int] = None
+    steps: list[ScanStepResponse] = []
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     queue_size: int = 0

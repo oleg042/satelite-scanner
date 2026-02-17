@@ -8,12 +8,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Facility, Scan, ScanStatus
+from app.models import Facility, Scan, ScanStatus, ScanStep
 from app.schemas import (
     BatchScanRequest,
     ScanRequest,
     ScanResponse,
+    ScanStepResponse,
     ScanSubmitted,
+    ScanTraceResponse,
     ScreenshotResponse,
 )
 from app.worker import enqueue_scan
@@ -157,3 +159,69 @@ async def list_scans(
     result = await db.execute(q)
     scans = result.scalars().all()
     return [_scan_to_response(s) for s in scans]
+
+
+def _parse_json_field(text: str | None) -> dict | None:
+    """Safely parse a JSON string field, return dict or None."""
+    if not text:
+        return None
+    try:
+        import json
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+@router.get("/scan/{scan_id}/steps", response_model=ScanTraceResponse)
+async def get_scan_steps(scan_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Get full pipeline trace with step-by-step decisions, AI prompts, and token usage."""
+    scan = await db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    facility = await db.get(Facility, scan.facility_id)
+
+    steps = []
+    total_ai_tokens = 0
+    for step in scan.steps:
+        steps.append(ScanStepResponse(
+            id=step.id,
+            step_number=step.step_number,
+            step_name=step.step_name,
+            status=step.status,
+            started_at=step.started_at,
+            completed_at=step.completed_at,
+            duration_ms=step.duration_ms,
+            input_summary=_parse_json_field(step.input_summary),
+            output_summary=_parse_json_field(step.output_summary),
+            decision=step.decision,
+            ai_model=step.ai_model,
+            ai_prompt=step.ai_prompt,
+            ai_response_raw=step.ai_response_raw,
+            ai_tokens_prompt=step.ai_tokens_prompt,
+            ai_tokens_completion=step.ai_tokens_completion,
+            ai_tokens_reasoning=step.ai_tokens_reasoning,
+            ai_tokens_total=step.ai_tokens_total,
+            tile_grid_cols=step.tile_grid_cols,
+            tile_grid_rows=step.tile_grid_rows,
+        ))
+        if step.ai_tokens_total:
+            total_ai_tokens += step.ai_tokens_total
+
+    total_ms = None
+    if scan.started_at and scan.completed_at:
+        total_ms = int((scan.completed_at - scan.started_at).total_seconds() * 1000)
+
+    return ScanTraceResponse(
+        scan_id=scan.id,
+        facility_name=facility.name if facility else "unknown",
+        lat=facility.lat if facility else 0,
+        lng=facility.lng if facility else 0,
+        status=scan.status.value if hasattr(scan.status, "value") else scan.status,
+        method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
+        started_at=scan.started_at,
+        completed_at=scan.completed_at,
+        total_duration_ms=total_ms,
+        total_ai_tokens=total_ai_tokens if total_ai_tokens > 0 else None,
+        steps=steps,
+    )

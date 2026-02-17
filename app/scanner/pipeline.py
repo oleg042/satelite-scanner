@@ -1,4 +1,4 @@
-"""Waterfall pipeline orchestrator.
+"""Waterfall pipeline orchestrator with full step-by-step tracing.
 
 Flow:
   1. OSM CHECK → find building footprint
@@ -9,6 +9,7 @@ Flow:
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -19,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Scan, ScanMethod, ScanStatus, Screenshot, ScreenshotType, Setting
+from app.models import Scan, ScanMethod, ScanStatus, ScanStep, Screenshot, ScreenshotType, Setting
 from app.scanner.cache import TileCache
 from app.scanner.geo import (
     M_PER_DEG_LAT,
@@ -110,6 +111,19 @@ async def _record_screenshot(
     await db.commit()
 
 
+async def _record_step(db: AsyncSession, scan_id, step_number: int, step_name: str, **kwargs):
+    """Create a pipeline step record."""
+    step = ScanStep(
+        scan_id=scan_id,
+        step_number=step_number,
+        step_name=step_name,
+        **kwargs,
+    )
+    db.add(step)
+    await db.commit()
+    return step
+
+
 async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: AsyncSession):
     """Execute the full waterfall pipeline for a single scan."""
     scan = await db.get(Scan, scan_id)
@@ -127,9 +141,11 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
     # Will be set by OSM or AI vision
     final_bbox = None
     method = None
+    step_num = 0
 
     try:
         # ── STEP 1: OSM CHECK ──────────────────────────────────────
+        step_num += 1
         scan.status = ScanStatus.running_osm
         await db.commit()
 
@@ -138,6 +154,9 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
         scan.osm_building_count = len(buildings)
 
         osm_bbox = None
+        osm_decision = None
+        osm_building_info = None
+
         if buildings:
             building = find_target_building(buildings, lat, lng)
             if building:
@@ -147,16 +166,50 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                 raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
                 osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
                 method = ScanMethod.osm_building
+                osm_building_info = {
+                    "osm_id": building["id"],
+                    "raw_bbox": list(raw_bbox),
+                    "buffered_bbox": list(osm_bbox),
+                    "coord_count": len(building["coords"]),
+                }
+                osm_decision = f"Found target building OSM #{building['id']} among {len(buildings)} buildings. Applied {buffer_m}m buffer."
+            else:
+                osm_decision = f"Found {len(buildings)} buildings but none matched target coordinates."
+        else:
+            osm_decision = "No buildings found within search radius."
 
-        scan.osm_duration_ms = int((time.monotonic() - osm_start) * 1000)
+        osm_elapsed = int((time.monotonic() - osm_start) * 1000)
+        scan.osm_duration_ms = osm_elapsed
         await db.commit()
+
+        await _record_step(
+            db, scan_id, step_num, "osm_check",
+            status="completed",
+            started_at=scan.started_at,
+            completed_at=datetime.now(timezone.utc),
+            duration_ms=osm_elapsed,
+            input_summary=json.dumps({
+                "facility_name": facility_name,
+                "lat": lat,
+                "lng": lng,
+                "search_radius_m": settings.search_radius_m,
+            }),
+            output_summary=json.dumps({
+                "buildings_found": len(buildings),
+                "target_building": osm_building_info,
+                "bbox": list(osm_bbox) if osm_bbox else None,
+            }),
+            decision=osm_decision,
+        )
 
         # ── STEP 2: AI VALIDATION (if OSM found something) ────────
         if osm_bbox and config["api_key"]:
+            step_num += 1
             scan.status = ScanStatus.running_validate
             await db.commit()
 
             ai_start = time.monotonic()
+            step_started = datetime.now(timezone.utc)
 
             # Capture overview at OSM bbox for validation
             ov_img, ov_grid = await asyncio.to_thread(
@@ -183,20 +236,55 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     config["validation_prompt"],
                 )
 
+                ai_elapsed = int((time.monotonic() - ai_start) * 1000)
+                val_decision = None
+
                 if validation:
                     scan.ai_validated = validation.approved
                     scan.ai_facility_type = validation.facility_type
                     scan.ai_notes = validation.notes
                     if validation.approved:
                         final_bbox = osm_bbox
+                        val_decision = f"APPROVED — AI confirmed OSM bbox covers the facility. Type: {validation.facility_type}"
                         logger.info("AI approved OSM bbox")
                     else:
+                        val_decision = f"REJECTED — {validation.reason}. Falling through to AI vision."
                         logger.info("AI rejected OSM bbox: %s", validation.reason)
-                        method = None  # Fall through to vision
+                        method = None
                 else:
-                    # Validation failed — still use OSM bbox as best guess
                     final_bbox = osm_bbox
+                    val_decision = "AI call failed (returned None). Using OSM bbox as fallback."
                     logger.warning("Validation call failed, using OSM bbox anyway")
+
+                await _record_step(
+                    db, scan_id, step_num, "ai_validation",
+                    status="completed",
+                    started_at=step_started,
+                    completed_at=datetime.now(timezone.utc),
+                    duration_ms=ai_elapsed,
+                    input_summary=json.dumps({
+                        "bbox": list(osm_bbox),
+                        "bbox_width_m": round(width_m, 1),
+                        "bbox_height_m": round(height_m, 1),
+                        "overview_zoom": overview_zoom,
+                        "overview_image": f"{ov_img.width}x{ov_img.height}px",
+                        "model": config["validation_model"],
+                    }),
+                    output_summary=json.dumps({
+                        "approved": validation.approved if validation else None,
+                        "facility_type": validation.facility_type if validation else None,
+                        "reason": validation.reason if validation else "call_failed",
+                        "notes": validation.notes if validation else None,
+                    }),
+                    decision=val_decision,
+                    ai_model=config["validation_model"],
+                    ai_prompt=validation.prompt_text if validation else None,
+                    ai_response_raw=validation.raw_response if validation else None,
+                    ai_tokens_prompt=validation.usage.prompt_tokens if validation and validation.usage else None,
+                    ai_tokens_completion=validation.usage.completion_tokens if validation and validation.usage else None,
+                    ai_tokens_reasoning=validation.usage.reasoning_tokens if validation and validation.usage else None,
+                    ai_tokens_total=validation.usage.total_tokens if validation and validation.usage else None,
+                )
 
                 ov_img.close()
 
@@ -204,14 +292,23 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
             await db.commit()
         elif osm_bbox:
             # No API key — just use OSM bbox
+            step_num += 1
             final_bbox = osm_bbox
+            await _record_step(
+                db, scan_id, step_num, "ai_validation",
+                status="skipped",
+                decision="No OpenAI API key configured. Using OSM bbox without AI validation.",
+                duration_ms=0,
+            )
 
         # ── STEP 3: AI VISION FALLBACK ─────────────────────────────
         if final_bbox is None and config["api_key"]:
+            step_num += 1
             scan.status = ScanStatus.running_vision
             await db.commit()
 
             ai_start = time.monotonic()
+            step_started = datetime.now(timezone.utc)
 
             # Capture wide overview
             wide_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.overview_radius_m)
@@ -239,6 +336,9 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     config["boundary_prompt"],
                 )
 
+                ai_elapsed = int((time.monotonic() - ai_start) * 1000)
+                vision_decision = None
+
                 if boundary:
                     scan.ai_confidence = boundary.confidence
                     scan.ai_facility_type = boundary.facility_type
@@ -247,11 +347,42 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
 
                     if boundary.confidence == "low" and boundary.facility_type and \
                        "office" in boundary.facility_type.lower():
-                        # Skip — not an industrial facility
+                        vision_decision = f"SKIPPED — AI detected non-industrial facility: {boundary.facility_type}"
                         scan.status = ScanStatus.skipped
                         scan.method = ScanMethod.skipped
                         scan.skip_reason = f"AI: {boundary.facility_type} — {boundary.notes}"
                         scan.completed_at = datetime.now(timezone.utc)
+
+                        await _record_step(
+                            db, scan_id, step_num, "ai_vision",
+                            status="completed",
+                            started_at=step_started,
+                            completed_at=datetime.now(timezone.utc),
+                            duration_ms=ai_elapsed,
+                            input_summary=json.dumps({
+                                "wide_bbox": list(wide_bbox),
+                                "overview_radius_m": settings.overview_radius_m,
+                                "overview_image": f"{ov_img.width}x{ov_img.height}px",
+                                "model": config["boundary_model"],
+                            }),
+                            output_summary=json.dumps({
+                                "confidence": boundary.confidence,
+                                "facility_type": boundary.facility_type,
+                                "building_count": boundary.building_count,
+                                "notes": boundary.notes,
+                                "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
+                                               "left_x": boundary.left_x, "right_x": boundary.right_x},
+                            }),
+                            decision=vision_decision,
+                            ai_model=config["boundary_model"],
+                            ai_prompt=boundary.prompt_text if boundary else None,
+                            ai_response_raw=boundary.raw_response if boundary else None,
+                            ai_tokens_prompt=boundary.usage.prompt_tokens if boundary.usage else None,
+                            ai_tokens_completion=boundary.usage.completion_tokens if boundary.usage else None,
+                            ai_tokens_reasoning=boundary.usage.reasoning_tokens if boundary.usage else None,
+                            ai_tokens_total=boundary.usage.total_tokens if boundary.usage else None,
+                        )
+
                         await db.commit()
                         ov_img.close()
                         return
@@ -262,6 +393,43 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     raw_bbox = (min(lat1, lat2), min(lng1, lng2), max(lat1, lat2), max(lng1, lng2))
                     final_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
                     method = ScanMethod.ai_vision
+                    vision_decision = (
+                        f"AI detected facility boundary — confidence: {boundary.confidence}, "
+                        f"type: {boundary.facility_type}, {boundary.building_count} buildings. "
+                        f"Pixel bbox: ({boundary.left_x},{boundary.top_y})-({boundary.right_x},{boundary.bottom_y}) "
+                        f"→ geo bbox: {[round(x, 6) for x in final_bbox]}"
+                    )
+                else:
+                    vision_decision = "AI boundary detection failed (returned None). Will fall back to radius."
+
+                await _record_step(
+                    db, scan_id, step_num, "ai_vision",
+                    status="completed",
+                    started_at=step_started,
+                    completed_at=datetime.now(timezone.utc),
+                    duration_ms=ai_elapsed,
+                    input_summary=json.dumps({
+                        "wide_bbox": list(wide_bbox),
+                        "overview_radius_m": settings.overview_radius_m,
+                        "overview_image": f"{ov_img.width}x{ov_img.height}px" if ov_img else None,
+                        "model": config["boundary_model"],
+                    }),
+                    output_summary=json.dumps({
+                        "confidence": boundary.confidence if boundary else None,
+                        "facility_type": boundary.facility_type if boundary else None,
+                        "building_count": boundary.building_count if boundary else None,
+                        "notes": boundary.notes if boundary else None,
+                        "detected_bbox": list(final_bbox) if final_bbox and method == ScanMethod.ai_vision else None,
+                    }),
+                    decision=vision_decision,
+                    ai_model=config["boundary_model"],
+                    ai_prompt=boundary.prompt_text if boundary else None,
+                    ai_response_raw=boundary.raw_response if boundary else None,
+                    ai_tokens_prompt=boundary.usage.prompt_tokens if boundary and boundary.usage else None,
+                    ai_tokens_completion=boundary.usage.completion_tokens if boundary and boundary.usage else None,
+                    ai_tokens_reasoning=boundary.usage.reasoning_tokens if boundary and boundary.usage else None,
+                    ai_tokens_total=boundary.usage.total_tokens if boundary and boundary.usage else None,
+                )
 
                 ov_img.close()
 
@@ -271,9 +439,25 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
 
         # ── FALLBACK: radius around point ──────────────────────────
         if final_bbox is None:
+            step_num += 1
             final_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.fallback_radius_m)
             method = ScanMethod.fallback_radius
             logger.info("Using fallback radius of %dm", settings.fallback_radius_m)
+
+            await _record_step(
+                db, scan_id, step_num, "fallback",
+                status="completed",
+                duration_ms=0,
+                input_summary=json.dumps({
+                    "lat": lat,
+                    "lng": lng,
+                    "fallback_radius_m": settings.fallback_radius_m,
+                }),
+                output_summary=json.dumps({
+                    "bbox": list(final_bbox),
+                }),
+                decision=f"No boundary found by OSM or AI. Using {settings.fallback_radius_m}m radius fallback.",
+            )
 
         # Record bbox
         scan.method = method
@@ -285,15 +469,19 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
         await db.commit()
 
         # ── STEP 4: TILING ─────────────────────────────────────────
+        step_num += 1
         scan.status = ScanStatus.running_tiling
         await db.commit()
 
         tile_start = time.monotonic()
+        step_started = datetime.now(timezone.utc)
+
         detail_img, grid_info = await asyncio.to_thread(
             capture_area,
             *final_bbox, zoom, cache, settings.tile_delay_s,
         )
 
+        tile_decision = None
         if detail_img and grid_info:
             scan.tile_count = grid_info["total"]
             scan.tiles_downloaded = grid_info["downloaded"]
@@ -313,13 +501,66 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                 filename, rel_path, abs_path, zoom,
                 cropped.width, cropped.height,
             )
-            cropped.close()
 
-        scan.tile_duration_ms = int((time.monotonic() - tile_start) * 1000)
+            file_size = os.path.getsize(abs_path) if os.path.exists(abs_path) else 0
+            tile_decision = (
+                f"Captured {grid_info['total']} tiles ({grid_info['cols']}x{grid_info['rows']} grid) "
+                f"at zoom {zoom}. Downloaded {grid_info['downloaded']} from server, "
+                f"{grid_info['total'] - grid_info['downloaded']} from cache. "
+                f"Final image: {cropped.width}x{cropped.height}px ({file_size // 1024}KB)"
+            )
+            cropped.close()
+        else:
+            tile_decision = "Tile capture failed — no image produced."
+
+        tile_elapsed = int((time.monotonic() - tile_start) * 1000)
+        scan.tile_duration_ms = tile_elapsed
+
+        await _record_step(
+            db, scan_id, step_num, "tiling",
+            status="completed",
+            started_at=step_started,
+            completed_at=datetime.now(timezone.utc),
+            duration_ms=tile_elapsed,
+            input_summary=json.dumps({
+                "bbox": list(final_bbox),
+                "bbox_width_m": round(width_m, 1),
+                "bbox_height_m": round(height_m, 1),
+                "zoom": zoom,
+                "tile_delay_s": settings.tile_delay_s,
+            }),
+            output_summary=json.dumps({
+                "tile_grid": f"{grid_info['cols']}x{grid_info['rows']}" if grid_info else None,
+                "total_tiles": grid_info["total"] if grid_info else None,
+                "tiles_downloaded": grid_info["downloaded"] if grid_info else None,
+                "tiles_from_cache": grid_info["total"] - grid_info["downloaded"] if grid_info else None,
+                "final_image_px": f"{scan.image_width}x{scan.image_height}" if scan.image_width else None,
+            }),
+            decision=tile_decision,
+            tile_grid_cols=grid_info["cols"] if grid_info else None,
+            tile_grid_rows=grid_info["rows"] if grid_info else None,
+        )
 
         # ── STEP 5: DONE ──────────────────────────────────────────
+        step_num += 1
         scan.status = ScanStatus.completed
         scan.completed_at = datetime.now(timezone.utc)
+
+        total_ms = int((scan.completed_at - scan.started_at).total_seconds() * 1000)
+
+        await _record_step(
+            db, scan_id, step_num, "done",
+            status="completed",
+            completed_at=scan.completed_at,
+            duration_ms=0,
+            decision=(
+                f"Pipeline complete — method: {method.value if method else 'unknown'}, "
+                f"total time: {total_ms}ms, "
+                f"bbox: {round(width_m, 1)}m x {round(height_m, 1)}m, "
+                f"final image: {scan.image_width}x{scan.image_height}px"
+            ),
+        )
+
         await db.commit()
         logger.info("Scan %s completed — method=%s", scan_id, method)
 
@@ -328,4 +569,13 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
         scan.status = ScanStatus.failed
         scan.error_message = str(e)[:1000]
         scan.completed_at = datetime.now(timezone.utc)
+
+        step_num += 1
+        await _record_step(
+            db, scan_id, step_num, "error",
+            status="failed",
+            completed_at=datetime.now(timezone.utc),
+            decision=f"Pipeline failed: {str(e)[:500]}",
+        )
+
         await db.commit()

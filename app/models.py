@@ -117,6 +117,7 @@ class Scan(Base):
 
     facility = relationship("Facility", back_populates="scans")
     screenshots = relationship("Screenshot", back_populates="scan", lazy="selectin")
+    steps = relationship("ScanStep", back_populates="scan", lazy="selectin", order_by="ScanStep.step_number")
 
 
 class Screenshot(Base):
@@ -133,6 +134,39 @@ class Screenshot(Base):
     zoom = Column(Integer, nullable=True)
 
     scan = relationship("Scan", back_populates="screenshots")
+
+
+class ScanStep(Base):
+    __tablename__ = "scan_steps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scan_id = Column(UUID(as_uuid=True), ForeignKey("scans.id"), nullable=False)
+    step_number = Column(Integer, nullable=False)
+    step_name = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, default="started")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+
+    # What went in / came out
+    input_summary = Column(Text, nullable=True)
+    output_summary = Column(Text, nullable=True)
+    decision = Column(Text, nullable=True)
+
+    # AI-specific
+    ai_model = Column(Text, nullable=True)
+    ai_prompt = Column(Text, nullable=True)
+    ai_response_raw = Column(Text, nullable=True)
+    ai_tokens_prompt = Column(Integer, nullable=True)
+    ai_tokens_completion = Column(Integer, nullable=True)
+    ai_tokens_reasoning = Column(Integer, nullable=True)
+    ai_tokens_total = Column(Integer, nullable=True)
+
+    # Tile-specific
+    tile_grid_cols = Column(Integer, nullable=True)
+    tile_grid_rows = Column(Integer, nullable=True)
+
+    scan = relationship("Scan", back_populates="steps")
 
 
 class Setting(Base):
