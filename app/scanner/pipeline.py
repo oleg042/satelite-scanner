@@ -482,6 +482,8 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
         )
 
         tile_decision = None
+        grid_cols = None
+        grid_rows = None
         if detail_img and grid_info:
             scan.tile_count = grid_info["total"]
             scan.tiles_downloaded = grid_info["downloaded"]
@@ -503,8 +505,10 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
             )
 
             file_size = os.path.getsize(abs_path) if os.path.exists(abs_path) else 0
+            grid_cols = grid_info["tile_max_x"] - grid_info["tile_min_x"] + 1
+            grid_rows = grid_info["tile_max_y"] - grid_info["tile_min_y"] + 1
             tile_decision = (
-                f"Captured {grid_info['total']} tiles ({grid_info['cols']}x{grid_info['rows']} grid) "
+                f"Captured {grid_info['total']} tiles ({grid_cols}x{grid_rows} grid) "
                 f"at zoom {zoom}. Downloaded {grid_info['downloaded']} from server, "
                 f"{grid_info['total'] - grid_info['downloaded']} from cache. "
                 f"Final image: {cropped.width}x{cropped.height}px ({file_size // 1024}KB)"
@@ -530,15 +534,15 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                 "tile_delay_s": settings.tile_delay_s,
             }),
             output_summary=json.dumps({
-                "tile_grid": f"{grid_info['cols']}x{grid_info['rows']}" if grid_info else None,
+                "tile_grid": f"{grid_cols}x{grid_rows}" if grid_info else None,
                 "total_tiles": grid_info["total"] if grid_info else None,
                 "tiles_downloaded": grid_info["downloaded"] if grid_info else None,
                 "tiles_from_cache": grid_info["total"] - grid_info["downloaded"] if grid_info else None,
                 "final_image_px": f"{scan.image_width}x{scan.image_height}" if scan.image_width else None,
             }),
             decision=tile_decision,
-            tile_grid_cols=grid_info["cols"] if grid_info else None,
-            tile_grid_rows=grid_info["rows"] if grid_info else None,
+            tile_grid_cols=grid_cols if grid_info else None,
+            tile_grid_rows=grid_rows if grid_info else None,
         )
 
         # ── STEP 5: DONE ──────────────────────────────────────────
