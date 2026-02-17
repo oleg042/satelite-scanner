@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Satellite Scanner</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @keyframes pulse-bg { 0%,100%{opacity:1} 50%{opacity:.6} }
+  .pulse-badge { animation: pulse-bg 1.5s ease-in-out infinite; }
+  .sort-asc::after { content: ' \u25B2'; font-size: .65em; }
+  .sort-desc::after { content: ' \u25BC'; font-size: .65em; }
+  .toast{animation:slideIn .3s ease}
+  @keyframes slideIn{from{transform:translateY(-1rem);opacity:0}to{transform:translateY(0);opacity:1}}
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+<!-- Toast container -->
+<div id="toasts" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+<!-- Header -->
+<header class="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+  <h1 class="text-xl font-bold tracking-tight">Satellite Scanner</h1>
+  <div id="health-badge" class="flex items-center gap-2 text-sm">
+    <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+    <span>Healthy</span>
+    <span class="text-gray-500">(<span id="queue-size">0</span>)</span>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+  <!-- Controls row -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+    <!-- New Scan form -->
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <h2 class="font-semibold text-sm uppercase tracking-wide text-gray-400 mb-3">New Scan</h2>
+      <form id="scan-form" class="space-y-2">
+        <input id="sf-name" type="text" placeholder="Facility name" required
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+        <div class="grid grid-cols-2 gap-2">
+          <input id="sf-lat" type="number" step="any" placeholder="Latitude" required
+            class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+          <input id="sf-lng" type="number" step="any" placeholder="Longitude" required
+            class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+        </div>
+        <input id="sf-addr" type="text" placeholder="Address (optional)"
+          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
+        <button id="sf-submit" type="submit"
+          class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-2 text-sm transition">
+          Submit Scan
+        </button>
+      </form>
+    </div>
+
+    <!-- Settings panel -->
+    <div class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-lg">
+      <button id="settings-toggle" class="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-400 hover:text-gray-200 transition">
+        <span class="font-semibold uppercase tracking-wide">Settings</span>
+        <svg id="settings-chevron" class="w-4 h-4 transform transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div id="settings-panel" class="hidden px-4 pb-4">
+        <form id="settings-form" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">OpenAI API Key</label>
+            <input id="set-api-key" type="password" placeholder="sk-..."
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Validation Model</label>
+            <input id="set-validation-model" type="text" placeholder="gpt-4o-mini"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Boundary Model</label>
+            <input id="set-boundary-model" type="text" placeholder="gpt-4o"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Default Zoom</label>
+            <input id="set-default-zoom" type="number" min="16" max="22"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Buffer (m)</label>
+            <input id="set-buffer" type="number" min="10" max="500"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Overview Zoom</label>
+            <input id="set-overview-zoom" type="number" min="16" max="21"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          </div>
+          <div class="sm:col-span-2 lg:col-span-3 flex justify-end">
+            <button type="submit"
+              class="bg-green-600 hover:bg-green-700 text-white font-medium rounded px-4 py-1.5 text-sm transition">
+              Save Settings
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="flex flex-wrap items-center gap-3">
+    <input id="search-input" type="text" placeholder="Search facility name..."
+      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
+    <select id="filter-status"
+      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+      <option value="">All Statuses</option>
+      <option value="queued">Queued</option>
+      <option value="running_osm">Running OSM</option>
+      <option value="running_validate">Running Validate</option>
+      <option value="running_vision">Running Vision</option>
+      <option value="running_tiling">Running Tiling</option>
+      <option value="completed">Completed</option>
+      <option value="failed">Failed</option>
+      <option value="skipped">Skipped</option>
+    </select>
+    <select id="filter-method"
+      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+      <option value="">All Methods</option>
+      <option value="osm_building">OSM Building</option>
+      <option value="osm_landuse">OSM Landuse</option>
+      <option value="ai_vision">AI Vision</option>
+      <option value="fallback_radius">Fallback Radius</option>
+      <option value="skipped">Skipped</option>
+    </select>
+    <button id="refresh-btn" title="Refresh"
+      class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
+      &#8635; Refresh
+    </button>
+    <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
+  </div>
+
+  <!-- Table -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-800 text-gray-400 text-left">
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_validated">AI</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="duration">Duration</th>
+            <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
+          </tr>
+        </thead>
+        <tbody id="scan-tbody"></tbody>
+      </table>
+    </div>
+    <!-- Empty state -->
+    <div id="empty-state" class="hidden text-center py-12 text-gray-500">
+      No scans found. Submit a facility above to get started.
+    </div>
+    <!-- Loading state -->
+    <div id="loading-state" class="text-center py-12 text-gray-500">
+      Loading scans...
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  <div class="flex items-center justify-between">
+    <button id="prev-btn" disabled
+      class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
+      &larr; Prev
+    </button>
+    <span id="page-info" class="text-sm text-gray-500"></span>
+    <button id="next-btn" disabled
+      class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
+      Next &rarr;
+    </button>
+  </div>
+
+</main>
+
+<script>
+// --- State ---
+const S = {
+  scans: [],
+  sortField: null,
+  sortDir: 'asc',
+  offset: 0,
+  limit: 50,
+  expanded: {},       // scan_id -> trace data (cache)
+  expandedOpen: {},   // scan_id -> bool (open/closed)
+  pollTimer: null,
+};
+
+// --- API helper ---
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || JSON.stringify(err));
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// --- Toast ---
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  const colors = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+  el.className = `toast ${colors} text-white text-sm px-4 py-2 rounded shadow-lg max-w-sm`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// --- Status badge ---
+function statusBadge(status) {
+  const map = {
+    queued: 'bg-gray-600 text-gray-100',
+    running_osm: 'bg-yellow-600 text-yellow-100 pulse-badge',
+    running_validate: 'bg-yellow-600 text-yellow-100 pulse-badge',
+    running_vision: 'bg-yellow-600 text-yellow-100 pulse-badge',
+    running_tiling: 'bg-yellow-600 text-yellow-100 pulse-badge',
+    completed: 'bg-green-700 text-green-100',
+    failed: 'bg-red-700 text-red-100',
+    skipped: 'bg-blue-700 text-blue-100',
+  };
+  const cls = map[status] || 'bg-gray-600 text-gray-100';
+  const label = (status || '').replace(/_/g, ' ');
+  return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}">${label}</span>`;
+}
+
+// --- Format helpers ---
+function fmtDuration(scan) {
+  if (!scan.started_at || !scan.completed_at) return '-';
+  const ms = new Date(scan.completed_at) - new Date(scan.started_at);
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtBbox(scan) {
+  if (scan.bbox_width_m == null || scan.bbox_height_m == null) return '-';
+  return `${Math.round(scan.bbox_width_m)}x${Math.round(scan.bbox_height_m)}m`;
+}
+
+function fmtAI(scan) {
+  if (scan.ai_validated === true) return '<span class="text-green-400 font-bold">&#10003;</span>';
+  if (scan.ai_validated === false) return '<span class="text-red-400 font-bold">&#10007;</span>';
+  return '<span class="text-gray-600">-</span>';
+}
+
+function fmtMethod(m) {
+  if (!m) return '-';
+  return m.replace(/_/g, ' ');
+}
+
+// --- Sorting ---
+function getSortValue(scan, field, idx) {
+  switch (field) {
+    case 'index': return idx;
+    case 'facility_name': return (scan.facility_name || '').toLowerCase();
+    case 'status': return scan.status || '';
+    case 'method': return scan.method || '';
+    case 'ai_validated': return scan.ai_validated === true ? 2 : scan.ai_validated === false ? 1 : 0;
+    case 'ai_facility_type': return (scan.ai_facility_type || '').toLowerCase();
+    case 'bbox': return (scan.bbox_width_m || 0) * (scan.bbox_height_m || 0);
+    case 'duration': {
+      if (!scan.started_at || !scan.completed_at) return 0;
+      return new Date(scan.completed_at) - new Date(scan.started_at);
+    }
+    case 'started_at': return scan.started_at ? new Date(scan.started_at).getTime() : 0;
+    default: return '';
+  }
+}
+
+function sortScans(scans) {
+  if (!S.sortField) return scans;
+  const sorted = scans.map((s, i) => ({ s, i }));
+  sorted.sort((a, b) => {
+    const va = getSortValue(a.s, S.sortField, a.i);
+    const vb = getSortValue(b.s, S.sortField, b.i);
+    let cmp = 0;
+    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb));
+    return S.sortDir === 'asc' ? cmp : -cmp;
+  });
+  return sorted.map(x => x.s);
+}
+
+// --- Render table ---
+function renderTable() {
+  const tbody = document.getElementById('scan-tbody');
+  const empty = document.getElementById('empty-state');
+  const loading = document.getElementById('loading-state');
+  loading.classList.add('hidden');
+
+  const sorted = sortScans(S.scans);
+
+  if (sorted.length === 0) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  let html = '';
+  sorted.forEach((scan, i) => {
+    const rowNum = S.offset + i + 1;
+    const isOpen = S.expandedOpen[scan.id];
+    html += `<tr class="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition" data-id="${scan.id}">
+      <td class="px-3 py-2 text-gray-500">${rowNum}</td>
+      <td class="px-3 py-2 font-medium">${esc(scan.facility_name || '-')}</td>
+      <td class="px-3 py-2">${statusBadge(scan.status)}</td>
+      <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
+      <td class="px-3 py-2 text-center">${fmtAI(scan)}</td>
+      <td class="px-3 py-2 text-gray-400">${esc(scan.ai_facility_type || '-')}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDuration(scan)}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
+    </tr>`;
+    if (isOpen) {
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="9" class="px-4 py-3">`;
+      html += renderDetail(scan);
+      html += `</td></tr>`;
+    }
+  });
+  tbody.innerHTML = html;
+
+  // Attach row click handlers
+  tbody.querySelectorAll('tr[data-id]').forEach(row => {
+    row.addEventListener('click', () => toggleRow(row.dataset.id));
+  });
+
+  // Update count
+  document.getElementById('scan-count').textContent = `${sorted.length} scan${sorted.length !== 1 ? 's' : ''}`;
+
+  // Pagination
+  document.getElementById('prev-btn').disabled = S.offset === 0;
+  document.getElementById('next-btn').disabled = sorted.length < S.limit;
+  const page = Math.floor(S.offset / S.limit) + 1;
+  document.getElementById('page-info').textContent = `Page ${page}`;
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// --- Detail panel ---
+function renderDetail(scan) {
+  const trace = S.expanded[scan.id];
+  let html = '<div class="space-y-4">';
+
+  // Screenshots
+  if (scan.screenshots && scan.screenshots.length > 0) {
+    html += '<div class="flex flex-wrap gap-3">';
+    scan.screenshots.forEach(ss => {
+      html += `<div class="text-center">
+        <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain" loading="lazy">
+        <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // Pipeline trace steps
+  if (trace && trace.steps) {
+    html += '<div class="space-y-2">';
+    html += '<h4 class="text-xs font-semibold uppercase tracking-wide text-gray-400">Pipeline Trace</h4>';
+    trace.steps.forEach(step => {
+      const dur = step.duration_ms != null ? `(${(step.duration_ms / 1000).toFixed(1)}s)` : '';
+      const dec = step.decision || '';
+      const stepColor = step.status === 'failed' ? 'text-red-400' : 'text-green-400';
+      html += `<div class="bg-gray-900 rounded px-3 py-2 text-sm">
+        <span class="text-gray-500">Step ${step.step_number}:</span>
+        <span class="font-medium">${esc(step.step_name.replace(/_/g, ' '))}</span>
+        <span class="text-gray-500">${dur}</span>
+        <span class="${stepColor}"> &rarr; ${esc(dec)}</span>`;
+
+      // AI token breakdown
+      if (step.ai_tokens_total) {
+        html += `<div class="text-xs text-gray-500 mt-1 ml-4">
+          Model: <span class="text-gray-300">${esc(step.ai_model || '?')}</span> |
+          Tokens: <span class="text-gray-300">${step.ai_tokens_total.toLocaleString()}</span>
+          (${(step.ai_tokens_prompt || 0).toLocaleString()}p + ${(step.ai_tokens_completion || 0).toLocaleString()}c${step.ai_tokens_reasoning ? ' + ' + step.ai_tokens_reasoning.toLocaleString() + 'r' : ''})
+        </div>`;
+      }
+
+      // Tile grid info
+      if (step.tile_grid_cols && step.tile_grid_rows) {
+        const total = step.tile_grid_cols * step.tile_grid_rows;
+        html += `<div class="text-xs text-gray-500 mt-1 ml-4">
+          Grid: ${step.tile_grid_cols}x${step.tile_grid_rows} = ${total} tiles
+        </div>`;
+      }
+
+      html += '</div>';
+    });
+
+    // Total AI tokens
+    if (trace.total_ai_tokens) {
+      html += `<div class="text-xs text-gray-400 mt-1">Total AI tokens: <span class="text-gray-200 font-medium">${trace.total_ai_tokens.toLocaleString()}</span></div>`;
+    }
+    html += '</div>';
+  } else if (!trace) {
+    html += '<div class="text-sm text-gray-500">Loading trace...</div>';
+  }
+
+  // Scan metadata
+  html += '<details class="text-xs"><summary class="text-gray-500 cursor-pointer hover:text-gray-300">Full Metadata</summary>';
+  html += `<pre class="mt-2 bg-gray-950 rounded p-3 overflow-x-auto text-gray-400 max-h-64">${esc(JSON.stringify(scan, null, 2))}</pre>`;
+  html += '</details>';
+
+  html += '</div>';
+  return html;
+}
+
+// --- Row expand/collapse ---
+async function toggleRow(scanId) {
+  if (S.expandedOpen[scanId]) {
+    S.expandedOpen[scanId] = false;
+    renderTable();
+    return;
+  }
+
+  S.expandedOpen[scanId] = true;
+
+  // Lazy-load trace if not cached
+  if (!S.expanded[scanId]) {
+    renderTable(); // show "Loading trace..." immediately
+    try {
+      const trace = await api('GET', `/api/scan/${scanId}/steps`);
+      S.expanded[scanId] = trace;
+    } catch (e) {
+      S.expanded[scanId] = { steps: [], error: e.message };
+    }
+  }
+  renderTable();
+}
+
+// --- Fetch scans ---
+async function fetchScans() {
+  const params = new URLSearchParams();
+  const status = document.getElementById('filter-status').value;
+  const method = document.getElementById('filter-method').value;
+  const search = document.getElementById('search-input').value.trim();
+
+  if (status) params.set('status', status);
+  if (method) params.set('method', method);
+  if (search) params.set('search', search);
+  params.set('limit', S.limit);
+  params.set('offset', S.offset);
+
+  try {
+    S.scans = await api('GET', `/api/scans?${params}`);
+    renderTable();
+    managePoll();
+  } catch (e) {
+    toast('Failed to load scans: ' + e.message, 'error');
+  }
+}
+
+// --- Polling ---
+const TERMINAL = new Set(['completed', 'failed', 'skipped']);
+
+function managePoll() {
+  const hasActive = S.scans.some(s => !TERMINAL.has(s.status));
+  if (hasActive && !S.pollTimer) {
+    S.pollTimer = setInterval(fetchScans, 5000);
+  } else if (!hasActive && S.pollTimer) {
+    clearInterval(S.pollTimer);
+    S.pollTimer = null;
+  }
+}
+
+// --- Health check ---
+async function fetchHealth() {
+  try {
+    const h = await api('GET', '/health');
+    document.getElementById('queue-size').textContent = h.queue_size;
+  } catch {}
+}
+
+// --- Settings ---
+async function loadSettings() {
+  try {
+    const s = await api('GET', '/api/settings');
+    document.getElementById('set-api-key').placeholder = s.openai_api_key || 'sk-...';
+    document.getElementById('set-validation-model').value = s.validation_model || '';
+    document.getElementById('set-boundary-model').value = s.boundary_model || '';
+    document.getElementById('set-default-zoom').value = s.default_zoom || '';
+    document.getElementById('set-buffer').value = s.default_buffer_m || '';
+    document.getElementById('set-overview-zoom').value = s.overview_zoom || '';
+  } catch {}
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
+  const body = {};
+  const key = document.getElementById('set-api-key').value.trim();
+  if (key) body.openai_api_key = key;
+  const vm = document.getElementById('set-validation-model').value.trim();
+  if (vm) body.validation_model = vm;
+  const bm = document.getElementById('set-boundary-model').value.trim();
+  if (bm) body.boundary_model = bm;
+  const dz = document.getElementById('set-default-zoom').value.trim();
+  if (dz) body.default_zoom = dz;
+  const buf = document.getElementById('set-buffer').value.trim();
+  if (buf) body.default_buffer_m = buf;
+  const oz = document.getElementById('set-overview-zoom').value.trim();
+  if (oz) body.overview_zoom = oz;
+
+  if (Object.keys(body).length === 0) {
+    toast('No changes to save', 'error');
+    return;
+  }
+
+  try {
+    await api('PUT', '/api/settings', body);
+    toast('Settings saved');
+    document.getElementById('set-api-key').value = '';
+    loadSettings();
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+}
+
+// --- Scan form ---
+async function submitScan(e) {
+  e.preventDefault();
+  const btn = document.getElementById('sf-submit');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  const body = {
+    name: document.getElementById('sf-name').value.trim(),
+    lat: parseFloat(document.getElementById('sf-lat').value),
+    lng: parseFloat(document.getElementById('sf-lng').value),
+  };
+  const addr = document.getElementById('sf-addr').value.trim();
+  if (addr) body.address = addr;
+
+  try {
+    await api('POST', '/api/scan', body);
+    toast(`Scan queued for ${body.name}`);
+    document.getElementById('scan-form').reset();
+    S.offset = 0;
+    fetchScans();
+    fetchHealth();
+  } catch (err) {
+    toast('Submit failed: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Submit Scan';
+  }
+}
+
+// --- Event listeners ---
+document.addEventListener('DOMContentLoaded', () => {
+  // Scan form
+  document.getElementById('scan-form').addEventListener('submit', submitScan);
+
+  // Settings toggle
+  document.getElementById('settings-toggle').addEventListener('click', () => {
+    const panel = document.getElementById('settings-panel');
+    const chevron = document.getElementById('settings-chevron');
+    panel.classList.toggle('hidden');
+    chevron.classList.toggle('rotate-180');
+  });
+
+  // Settings save
+  document.getElementById('settings-form').addEventListener('submit', saveSettings);
+
+  // Filters
+  let searchTimer;
+  document.getElementById('search-input').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { S.offset = 0; fetchScans(); }, 300);
+  });
+  document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+  document.getElementById('filter-method').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+
+  // Refresh
+  document.getElementById('refresh-btn').addEventListener('click', fetchScans);
+
+  // Pagination
+  document.getElementById('prev-btn').addEventListener('click', () => {
+    S.offset = Math.max(0, S.offset - S.limit);
+    fetchScans();
+  });
+  document.getElementById('next-btn').addEventListener('click', () => {
+    S.offset += S.limit;
+    fetchScans();
+  });
+
+  // Column sorting
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.sort;
+      if (S.sortField === field) {
+        S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        S.sortField = field;
+        S.sortDir = 'asc';
+      }
+      // Update header classes
+      document.querySelectorAll('th[data-sort]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+      th.classList.add(S.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+      renderTable();
+    });
+  });
+
+  // Initial load
+  fetchScans();
+  fetchHealth();
+  loadSettings();
+  setInterval(fetchHealth, 30000);
+});
+</script>
+</body>
+</html>

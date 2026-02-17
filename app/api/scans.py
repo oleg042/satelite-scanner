@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
+def _scan_to_response(scan: Scan, facility_name: str = "", base_url: str = "") -> ScanResponse:
     """Convert Scan ORM to ScanResponse with screenshot URLs."""
     screenshots = []
     for ss in scan.screenshots:
@@ -41,6 +41,7 @@ def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
     return ScanResponse(
         id=scan.id,
         facility_id=scan.facility_id,
+        facility_name=facility_name,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
         method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
         zoom=scan.zoom,
@@ -136,29 +137,35 @@ async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     scan = await db.get(Scan, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return _scan_to_response(scan)
+    facility = await db.get(Facility, scan.facility_id)
+    return _scan_to_response(scan, facility_name=facility.name if facility else "")
 
 
 @router.get("/scans", response_model=list[ScanResponse])
 async def list_scans(
     status: str | None = Query(None),
     method: str | None = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """List scans with optional filtering."""
-    q = select(Scan).order_by(Scan.started_at.desc().nullslast())
+    """List scans with optional filtering and facility name search."""
+    q = select(Scan, Facility.name.label("facility_name")).join(
+        Facility, Scan.facility_id == Facility.id, isouter=True
+    ).order_by(Scan.started_at.desc().nullslast())
 
     if status:
         q = q.where(Scan.status == status)
     if method:
         q = q.where(Scan.method == method)
+    if search:
+        q = q.where(Facility.name.ilike(f"%{search}%"))
 
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
-    scans = result.scalars().all()
-    return [_scan_to_response(s) for s in scans]
+    rows = result.all()
+    return [_scan_to_response(row[0], facility_name=row[1] or "") for row in rows]
 
 
 def _parse_json_field(text: str | None) -> dict | None:

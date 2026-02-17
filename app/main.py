@@ -5,8 +5,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.router import api_router, health_router
@@ -87,7 +90,15 @@ app = FastAPI(
 app.include_router(api_router)
 app.include_router(health_router)
 
+# Mount static files (after routers so API routes take priority)
+_static_dir = Path(__file__).parent / "static"
+_static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
 
 @app.get("/", include_in_schema=False)
 async def root():
+    index = _static_dir / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
     return RedirectResponse(url="/docs")

@@ -53,6 +53,7 @@ class ScreenshotResponse(BaseModel):
 class ScanResponse(BaseModel):
     id: UUID
     facility_id: UUID
+    facility_name: str = ""
     status: str
     method: Optional[str] = None
     zoom: Optional[int] = None
