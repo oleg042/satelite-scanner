@@ -720,15 +720,46 @@ async function geocodeCensus(str) {
 }
 
 async function geocodeAddress(str) {
-  const res = await fetch(`/api/geocode/nominatim?address=${encodeURIComponent(str)}`);
-  if (!res.ok) throw new Error(`Nominatim returned ${res.status}`);
-  const data = await res.json();
-  if (!data || data.length === 0) return geocodeCensus(str);
-  return data.map(r => ({
-    lat: parseFloat(r.lat),
-    lng: parseFloat(r.lon),
-    display_name: r.display_name,
-  }));
+  const nominatimP = fetch(`/api/geocode/nominatim?address=${encodeURIComponent(str)}`)
+    .then(r => r.ok ? r.json() : [])
+    .then(data => (data || []).map(r => ({
+      lat: parseFloat(r.lat), lng: parseFloat(r.lon), display_name: r.display_name,
+    })))
+    .catch(() => []);
+
+  const censusP = fetch(`/api/geocode/census?address=${encodeURIComponent(str)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      const matches = data?.result?.addressMatches;
+      if (!matches || matches.length === 0) return [];
+      return matches.map(m => ({
+        lat: m.coordinates.y, lng: m.coordinates.x, display_name: m.matchedAddress,
+      }));
+    })
+    .catch(() => []);
+
+  const [census, nominatim] = await Promise.all([censusP, nominatimP]);
+
+  // Census first (accurate US address interpolation), then Nominatim alternatives
+  // Deduplicate: skip Nominatim results within 500m of any Census result
+  const results = [...census];
+  for (const nr of nominatim) {
+    const tooClose = results.some(r => haversineKm(r, nr) < 0.5);
+    if (!tooClose) results.push(nr);
+  }
+
+  if (results.length === 0) throw new Error('No results found for this address');
+  return results;
+}
+
+function haversineKm(a, b) {
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lng - a.lng);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h = sinLat * sinLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLon * sinLon;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
 async function resolveLocation(input) {

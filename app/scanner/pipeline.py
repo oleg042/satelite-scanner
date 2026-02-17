@@ -35,6 +35,8 @@ from app.scanner.osm import (
     query_osm_buildings,
     query_osm_landuse,
 )
+from PIL import Image as PILImage
+
 from app.scanner.tiles import capture_area, crop_to_bbox
 from app.scanner.vision import detect_facility_boundary, validate_osm_bbox
 
@@ -122,6 +124,39 @@ async def _record_step(db: AsyncSession, scan_id, step_number: int, step_name: s
     db.add(step)
     await db.commit()
     return step
+
+
+async def _downscale_overview(
+    db: AsyncSession, scan_id, screenshot_type: ScreenshotType,
+    abs_path: str, max_width: int = 1080,
+):
+    """Downscale an overview screenshot to save storage. Overwrites the file in place."""
+    img = PILImage.open(abs_path)
+    if img.width <= max_width:
+        img.close()
+        return
+    ratio = max_width / img.width
+    new_height = int(img.height * ratio)
+    resized = img.resize((max_width, new_height), PILImage.LANCZOS)
+    img.close()
+    resized.save(abs_path)
+    resized.close()
+
+    new_size = os.path.getsize(abs_path)
+    result = await db.execute(
+        select(Screenshot).where(
+            Screenshot.scan_id == scan_id,
+            Screenshot.type == screenshot_type,
+        )
+    )
+    ss = result.scalar_one_or_none()
+    if ss:
+        ss.width = max_width
+        ss.height = new_height
+        ss.file_size_bytes = new_size
+        await db.commit()
+
+    logger.info("Downscaled %s screenshot to %dx%d (%dKB)", screenshot_type.value, max_width, new_height, new_size // 1024)
 
 
 async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: AsyncSession):
@@ -286,6 +321,7 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     ai_tokens_total=validation.usage.total_tokens if validation and validation.usage else None,
                 )
 
+                await _downscale_overview(db, scan_id, ScreenshotType.overview, abs_path)
                 ov_img.close()
 
             scan.ai_duration_ms = int((time.monotonic() - ai_start) * 1000)
@@ -345,8 +381,17 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     scan.ai_building_count = boundary.building_count
                     scan.ai_notes = boundary.notes
 
-                    if boundary.confidence == "low" and boundary.facility_type and \
-                       "office" in boundary.facility_type.lower():
+                    NON_INDUSTRIAL_TYPES = {
+                        "office", "residential", "apartment", "house", "housing",
+                        "neighborhood", "school", "church", "park", "farm",
+                        "agricultural", "retail", "restaurant", "hotel", "motel",
+                        "cemetery", "golf", "parking lot", "vacant",
+                    }
+
+                    ft_lower = (boundary.facility_type or "").lower()
+                    is_non_industrial = any(kw in ft_lower for kw in NON_INDUSTRIAL_TYPES)
+
+                    if boundary.confidence == "low" and is_non_industrial:
                         vision_decision = f"SKIPPED — AI detected non-industrial facility: {boundary.facility_type}"
                         scan.status = ScanStatus.skipped
                         scan.method = ScanMethod.skipped
@@ -384,6 +429,7 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                         )
 
                         await db.commit()
+                        await _downscale_overview(db, scan_id, ScreenshotType.ai_overview, abs_path)
                         ov_img.close()
                         return
 
@@ -431,6 +477,7 @@ async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: 
                     ai_tokens_total=boundary.usage.total_tokens if boundary and boundary.usage else None,
                 )
 
+                await _downscale_overview(db, scan_id, ScreenshotType.ai_overview, abs_path)
                 ov_img.close()
 
             ai_elapsed = int((time.monotonic() - ai_start) * 1000)

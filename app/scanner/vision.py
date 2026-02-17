@@ -88,6 +88,39 @@ def _image_to_base64(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
+def _prepare_image_for_ai(image_path: str, max_long_side: int = 2048) -> tuple:
+    """Downscale image for AI input to avoid sending pixels OpenAI will discard anyway.
+
+    Returns (base64_str, width, height, scale_factor).
+    scale_factor = original / downscaled (1.0 if no scaling needed).
+    Multiply AI-returned pixel coords by scale_factor to map back to original image space.
+    """
+    import io
+
+    img = Image.open(image_path)
+    orig_w, orig_h = img.size
+    long_side = max(orig_w, orig_h)
+
+    if long_side <= max_long_side:
+        img.close()
+        return _image_to_base64(image_path), orig_w, orig_h, 1.0
+
+    ratio = max_long_side / long_side
+    new_w = int(orig_w * ratio)
+    new_h = int(orig_h * ratio)
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+    img.close()
+
+    buf = io.BytesIO()
+    resized.save(buf, format="PNG")
+    resized.close()
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    scale = orig_w / new_w
+    logger.info("Pre-scaled image for AI: %dx%d → %dx%d (scale=%.3f)", orig_w, orig_h, new_w, new_h, scale)
+    return b64, new_w, new_h, scale
+
+
 def _parse_json_response(text: str) -> dict:
     """Parse JSON from an AI response, handling markdown code blocks."""
     text = text.strip()
@@ -123,7 +156,7 @@ def validate_osm_bbox(
     prompt = prompt_template.format(
         name=name, lat=lat, lng=lng, width_m=width_m, height_m=height_m
     )
-    img_b64 = _image_to_base64(image_path)
+    img_b64, _, _, _ = _prepare_image_for_ai(image_path)
 
     logger.info("Calling %s for OSM validation...", model)
 
@@ -194,11 +227,9 @@ def detect_facility_boundary(
         logger.error("No boundary prompt available")
         return None
 
-    img = Image.open(image_path)
-    img_w, img_h = img.size
-    img.close()
+    img_b64, img_w, img_h, scale = _prepare_image_for_ai(image_path)
 
-    # Add image context to the prompt
+    # Add image context to the prompt (dimensions reflect what the AI actually sees)
     context = (
         f"\n\n## IMAGE CONTEXT\n"
         f"- Facility name: {name}\n"
@@ -211,7 +242,6 @@ def detect_facility_boundary(
         f'"building_count": <int>, "notes": "<observations>"}}'
     )
     full_prompt = prompt_template + context
-    img_b64 = _image_to_base64(image_path)
 
     logger.info("Calling %s for boundary detection...", model)
 
@@ -242,6 +272,14 @@ def detect_facility_boundary(
         )
 
         data = _parse_json_response(text)
+
+        # Scale pixel coords back to original image space
+        if scale != 1.0:
+            data["top_y"] = round(data["top_y"] * scale)
+            data["bottom_y"] = round(data["bottom_y"] * scale)
+            data["left_x"] = round(data["left_x"] * scale)
+            data["right_x"] = round(data["right_x"] * scale)
+
         return BoundaryResult(
             top_y=data["top_y"],
             bottom_y=data["bottom_y"],
