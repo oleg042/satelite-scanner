@@ -108,7 +108,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         validation_prompt=settings_dict.get("validation_prompt", ""),
         boundary_prompt=settings_dict.get("boundary_prompt", ""),
         verification_prompt=settings_dict.get("verification_prompt", ""),
-        correction_prompt=settings_dict.get("correction_prompt", ""),
+        verification_model=settings_dict.get("verification_model", ""),
     )
 
 

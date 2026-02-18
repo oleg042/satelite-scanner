@@ -349,18 +349,24 @@ def verify_facility_boundary(
 
 def correct_facility_boundary(
     image_path: str,
+    name: str,
+    lat: float,
+    lng: float,
+    width_m: float,
+    height_m: float,
     boundary: BoundaryResult,
     verification: VerificationResult,
     api_key: str,
     model: str,
     prompt_template: str = "",
 ) -> Optional[BoundaryResult]:
-    """Adjust an existing boundary using lightweight correction instead of full re-detection.
+    """Re-detect facility boundary using full boundary prompt plus correction context.
 
-    Uses the verifier's per-edge feedback to make targeted coordinate adjustments.
-    Much cheaper than a full detect_facility_boundary() call.
+    Sends the boundary_prompt (with domain rules) plus a CORRECTION CONTEXT suffix
+    containing the previous attempt's coordinates and per-edge verification feedback.
+    The model performs a full boundary analysis — not a blind coordinate nudge.
 
-    Returns a new BoundaryResult with adjusted coordinates, or None on error.
+    Returns a new BoundaryResult with corrected coordinates, or None on error.
     """
     if not api_key:
         return None
@@ -422,19 +428,48 @@ def correct_facility_boundary(
         edge_left = edge_fb.get("left", fallback)
         edge_right = edge_fb.get("right", fallback)
 
-        prompt = prompt_template.format(
-            top_y=prompt_top, bottom_y=prompt_bottom,
-            left_x=prompt_left, right_x=prompt_right,
-            img_w=ai_w, img_h=ai_h,
-            edge_top=edge_top, edge_bottom=edge_bottom,
-            edge_left=edge_left, edge_right=edge_right,
+        # Assemble full prompt: boundary_prompt + CORRECTION CONTEXT + IMAGE CONTEXT
+        # Critical: no .format() on boundary prompt — use concatenation + f-strings
+        correction_context = (
+            f"\n\n## CORRECTION CONTEXT\n"
+            f"A red rectangle on the image shows a previous boundary attempt that was rejected.\n\n"
+            f"Previous boundary coordinates (pixels):\n"
+            f"  top_y={prompt_top}, bottom_y={prompt_bottom}, left_x={prompt_left}, right_x={prompt_right}\n\n"
+            f"The verification agent assessed each edge:\n"
+            f"- TOP: {edge_top}\n"
+            f"- BOTTOM: {edge_bottom}\n"
+            f"- LEFT: {edge_left}\n"
+            f"- RIGHT: {edge_right}\n\n"
+            f"Re-evaluate the facility boundary considering this feedback. The verification notes carry\n"
+            f"significant weight — edges flagged as extending too far likely need pulling inward, edges\n"
+            f"flagged as cutting off the facility likely need pushing outward. Edges marked 'ok' should\n"
+            f"stay close to their current position.\n\n"
+            f"However, do NOT blindly follow the feedback — perform your own full analysis using the\n"
+            f"boundary identification rules above. If you disagree with the verification on a specific\n"
+            f"edge, explain why in your reasoning."
         )
+
+        image_context = (
+            f"\n\n## IMAGE CONTEXT\n"
+            f"- Facility name: {name}\n"
+            f"- Center coordinates: ({lat}, {lng})\n"
+            f"- Image dimensions: {ai_w}px x {ai_h}px\n"
+            f"- Coverage: approximately {width_m:.0f}m x {height_m:.0f}m\n\n"
+            f"Respond with ONLY a JSON object:\n"
+            f'{{"top_y": <int>, "bottom_y": <int>, "left_x": <int>, "right_x": <int>, '
+            f'"reasoning": "<how you identified the boundary>", '
+            f'"self_check": "<edge-by-edge verification>", '
+            f'"confidence": "high/medium/low", "facility_type": "<type>", '
+            f'"building_count": <int>, "notes": "<observations>"}}'
+        )
+
+        full_prompt = prompt_template + correction_context + image_context
 
         logger.info("Calling %s for boundary correction...", model)
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=model,
-            max_completion_tokens=4096,
+            max_completion_tokens=8192,
             messages=[{
                 "role": "user",
                 "content": [
@@ -442,7 +477,7 @@ def correct_facility_boundary(
                         "type": "image_url",
                         "image_url": {"url": f"data:image/png;base64,{img_b64}"},
                     },
-                    {"type": "text", "text": prompt},
+                    {"type": "text", "text": full_prompt},
                 ],
             }],
         )
@@ -465,20 +500,19 @@ def correct_facility_boundary(
             data["left_x"] = round(data["left_x"] * scale)
             data["right_x"] = round(data["right_x"] * scale)
 
-        # Carry over metadata from original boundary — only coordinates change
         return BoundaryResult(
             top_y=data["top_y"],
             bottom_y=data["bottom_y"],
             left_x=data["left_x"],
             right_x=data["right_x"],
-            confidence=data.get("confidence", boundary.confidence),
-            facility_type=boundary.facility_type,
-            building_count=boundary.building_count,
-            notes=boundary.notes,
+            confidence=data.get("confidence", "medium"),
+            facility_type=data.get("facility_type", boundary.facility_type),
+            building_count=data.get("building_count", boundary.building_count),
+            notes=data.get("notes", boundary.notes),
             reasoning=data.get("reasoning", ""),
-            self_check="",
+            self_check=data.get("self_check", ""),
             raw_response=text,
-            prompt_text=prompt,
+            prompt_text=full_prompt,
             usage=usage,
         )
     except Exception as e:

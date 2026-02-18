@@ -82,19 +82,19 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     validation_prompt = await _get_setting(db, "validation_prompt", "")
     boundary_prompt = await _get_setting(db, "boundary_prompt", "")
     verification_prompt = await _get_setting(db, "verification_prompt", "")
-    correction_prompt = await _get_setting(db, "correction_prompt", "")
+    verification_model = await _get_setting(db, "verification_model", "gpt-5.2")
 
     return {
         "api_key": api_key,
         "validation_model": validation_model,
         "boundary_model": boundary_model,
+        "verification_model": verification_model,
         "zoom": scan.zoom or default_zoom,
         "buffer_m": scan.buffer_m or default_buffer,
         "overview_zoom": overview_zoom,
         "validation_prompt": validation_prompt,
         "boundary_prompt": boundary_prompt,
         "verification_prompt": verification_prompt,
-        "correction_prompt": correction_prompt,
     }
 
 
@@ -553,7 +553,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         verification = await asyncio.to_thread(
                             verify_facility_boundary,
                             abs_path, facility_name, boundary,
-                            config["api_key"], config["validation_model"],
+                            config["api_key"], config["verification_model"],
                             config["verification_prompt"],
                         )
                     except Exception as e:
@@ -610,13 +610,14 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
                         retries.append(rejected_attempt)
 
-                        # Correct boundary using lightweight model (same tier as verification)
+                        # Correct boundary using full boundary model + domain prompt
                         try:
                             boundary = await asyncio.to_thread(
                                 correct_facility_boundary,
-                                abs_path, boundary, verification,
-                                config["api_key"], config["validation_model"],
-                                config["correction_prompt"],
+                                abs_path, facility_name, lat, lng, width_m, height_m,
+                                boundary, verification,
+                                config["api_key"], config["boundary_model"],
+                                config["boundary_prompt"],
                             )
                         except Exception as e:
                             if _is_fatal_ai_error(e):
@@ -640,7 +641,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                             verification = await asyncio.to_thread(
                                 verify_facility_boundary,
                                 abs_path, facility_name, boundary,
-                                config["api_key"], config["validation_model"],
+                                config["api_key"], config["verification_model"],
                                 config["verification_prompt"],
                             )
                         except Exception as e:
@@ -686,7 +687,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 final_verification = None
                 if verification:
                     final_verification = {
-                        "model": config["validation_model"],
+                        "model": config["verification_model"],
                         "approved": verification.approved,
                         "reason": verification.reason,
                         "issues": verification.issues,
