@@ -73,6 +73,10 @@ async def _init_db():
                   lng = f.lng
                 FROM facilities f WHERE scans.facility_id = f.id;
 
+                -- Drop FK and make facility_id nullable BEFORE orphan insert
+                ALTER TABLE scans DROP CONSTRAINT IF EXISTS scans_facility_id_fkey;
+                ALTER TABLE scans ALTER COLUMN facility_id DROP NOT NULL;
+
                 -- Recover orphaned facilities as pending scans
                 INSERT INTO scans (id, facility_name, facility_address, lat, lng, status)
                 SELECT id, name, address, lat, lng, 'pending'::scan_status
@@ -82,8 +86,7 @@ async def _init_db():
                 UPDATE scans SET facility_name = 'Unknown' WHERE facility_name IS NULL;
                 ALTER TABLE scans ALTER COLUMN facility_name SET NOT NULL;
 
-                -- Drop FK, column, and table
-                ALTER TABLE scans DROP CONSTRAINT IF EXISTS scans_facility_id_fkey;
+                -- Drop column and table
                 ALTER TABLE scans DROP COLUMN IF EXISTS facility_id;
                 DROP TABLE IF EXISTS facilities;
 
