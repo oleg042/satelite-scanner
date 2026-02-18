@@ -169,12 +169,10 @@
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
-              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_validated">AI</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Coords</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Map</th>
-              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="duration">Duration</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
             </tr>
           </thead>
@@ -544,13 +542,8 @@ function getSortValue(scan, field, idx) {
     case 'facility_address': return (scan.facility_address || '').toLowerCase();
     case 'status': return scan.status || '';
     case 'method': return scan.method || '';
-    case 'ai_validated': return scan.ai_validated === true ? 2 : scan.ai_validated === false ? 1 : 0;
     case 'ai_facility_type': return (scan.ai_facility_type || '').toLowerCase();
     case 'bbox': return (scan.bbox_width_m || 0) * (scan.bbox_height_m || 0);
-    case 'duration': {
-      if (!scan.started_at || !scan.completed_at) return 0;
-      return new Date(scan.completed_at) - new Date(scan.started_at);
-    }
     case 'started_at': return scan.started_at ? new Date(scan.started_at).getTime() : 0;
     default: return '';
   }
@@ -599,16 +592,14 @@ function renderTable() {
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
-      <td class="px-3 py-2 text-center">${fmtAI(scan)}</td>
       <td class="px-3 py-2 text-gray-400 max-w-[10rem] truncate" title="${esc(scan.ai_facility_type || '')}">${fmtType(scan.ai_facility_type)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtMapLink(scan)}</td>
-      <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDuration(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="14" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="12" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
