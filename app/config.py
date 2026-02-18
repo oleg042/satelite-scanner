@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://localhost/satellite_scanner"
     volume_path: str = "./data"
     openai_api_key: str = ""
+    serper_api_key: str = ""
     default_zoom: int = 20
     default_buffer_m: int = 50
     overview_zoom: int = 19

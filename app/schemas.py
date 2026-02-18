@@ -36,6 +36,7 @@ class BatchScanRequest(BaseModel):
 
 class SettingsUpdate(BaseModel):
     openai_api_key: Optional[str] = None
+    serper_api_key: Optional[str] = None
     validation_model: Optional[str] = None
     boundary_model: Optional[str] = None
     default_zoom: Optional[str] = None
@@ -119,6 +120,7 @@ class FacilityResponse(BaseModel):
 
 class SettingsResponse(BaseModel):
     openai_api_key: str = ""
+    serper_api_key: str = ""
     validation_model: str = ""
     boundary_model: str = ""
     default_zoom: str = ""

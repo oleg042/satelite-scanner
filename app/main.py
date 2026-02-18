@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Default settings to seed on first run
 DEFAULT_SETTINGS = {
     "openai_api_key": settings.openai_api_key,
+    "serper_api_key": settings.serper_api_key,
     "validation_model": "gpt-4o-mini",
     "boundary_model": "gpt-4o",
     "default_zoom": str(settings.default_zoom),

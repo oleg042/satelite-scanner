@@ -241,6 +241,12 @@
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none max-w-md">
             <p class="text-xs text-gray-600 mt-1">Leave blank to keep current key. Current: <span id="set-api-key-mask" class="text-gray-500">not set</span></p>
           </div>
+          <div>
+            <label class="block text-sm text-gray-300 mb-1.5">Serper API Key</label>
+            <input id="set-serper-key" type="password" placeholder="serper-..."
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none max-w-md">
+            <p class="text-xs text-gray-600 mt-1">Leave blank to keep current key. Current: <span id="set-serper-key-mask" class="text-gray-500">not set</span></p>
+          </div>
         </div>
 
         <!-- Models -->
@@ -455,10 +461,7 @@ function fmtCoords(scan) {
 
 function fmtType(t) {
   if (!t) return '-';
-  const parts = t.split(/[\s/]+/);
-  if (parts.length <= 2) return esc(t);
-  const mid = Math.ceil(parts.length / 2);
-  return `<div class="leading-tight"><div>${esc(parts.slice(0, mid).join(' '))}</div><div>${esc(parts.slice(mid).join(' '))}</div></div>`;
+  return esc(t);
 }
 
 // --- Sorting ---
@@ -525,7 +528,7 @@ function renderTable() {
       <td class="px-3 py-2">${statusBadge(scan.status)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
       <td class="px-3 py-2 text-center">${fmtAI(scan)}</td>
-      <td class="px-3 py-2 text-gray-400 max-w-[10rem]">${fmtType(scan.ai_facility_type)}</td>
+      <td class="px-3 py-2 text-gray-400 max-w-[10rem] truncate" title="${esc(scan.ai_facility_type || '')}">${fmtType(scan.ai_facility_type)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtMapLink(scan)}</td>
@@ -597,8 +600,9 @@ function renderDetail(scan) {
   }
 
   if (trace && trace.steps) {
-    html += '<div class="space-y-2">';
-    html += '<h4 class="text-xs font-semibold uppercase tracking-wide text-gray-400">Pipeline Trace</h4>';
+    html += '<details class="text-xs">';
+    html += '<summary class="text-xs font-semibold uppercase tracking-wide text-gray-400 cursor-pointer hover:text-gray-300">Pipeline Trace</summary>';
+    html += '<div class="space-y-2 mt-2">';
     trace.steps.forEach(step => {
       const dur = step.duration_ms != null ? `(${(step.duration_ms / 1000).toFixed(1)}s)` : '';
       const dec = step.decision || '';
@@ -630,7 +634,7 @@ function renderDetail(scan) {
     if (trace.total_ai_tokens) {
       html += `<div class="text-xs text-gray-400 mt-1">Total AI tokens: <span class="text-gray-200 font-medium">${trace.total_ai_tokens.toLocaleString()}</span></div>`;
     }
-    html += '</div>';
+    html += '</div></details>';
   } else if (!trace) {
     html += '<div class="text-sm text-gray-500">Loading trace...</div>';
   }
@@ -765,6 +769,8 @@ async function loadSettings() {
     const s = await api('GET', '/api/settings');
     document.getElementById('set-api-key').value = '';
     document.getElementById('set-api-key-mask').textContent = s.openai_api_key || 'not set';
+    document.getElementById('set-serper-key').value = '';
+    document.getElementById('set-serper-key-mask').textContent = s.serper_api_key || 'not set';
     document.getElementById('set-validation-model').value = s.validation_model || '';
     document.getElementById('set-boundary-model').value = s.boundary_model || '';
     document.getElementById('set-default-zoom').value = s.default_zoom || '';
@@ -791,6 +797,8 @@ async function saveSettings(e) {
   const body = {};
   const key = document.getElementById('set-api-key').value.trim();
   if (key) body.openai_api_key = key;
+  const sk = document.getElementById('set-serper-key').value.trim();
+  if (sk) body.serper_api_key = sk;
   const vm = document.getElementById('set-validation-model').value.trim();
   if (vm) body.validation_model = vm;
   const bm = document.getElementById('set-boundary-model').value.trim();
@@ -841,6 +849,17 @@ function parseRawCoords(str) {
 
 // --- Geocoder helpers (each returns [] on failure, never throws) ---
 
+function fetchSerper(facilityName, address) {
+  const q = [facilityName, address].filter(Boolean).join(' ');
+  if (!q) return Promise.resolve([]);
+  return fetch(`/api/geocode/serper?q=${encodeURIComponent(q)}`)
+    .then(r => r.ok ? r.json() : { results: [] })
+    .then(data => (data.results || []).map(r => ({
+      lat: r.lat, lng: r.lng, display_name: r.display_name, source: 'serper',
+    })))
+    .catch(() => []);
+}
+
 function fetchGoogle(facilityName, address) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000); // hard ceiling
@@ -881,17 +900,28 @@ function fetchNominatim(address) {
 }
 
 async function geocodeAddress(str, facilityName = '') {
-  // Fire all geocoders in parallel immediately
+  // Step 1: Try Serper first (fastest, most accurate)
+  const serper = await fetchSerper(facilityName, str);
+  if (serper.length > 0) {
+    // Fire others in background for alternatives, but return Serper as primary
+    const othersP = Promise.all([fetchCensus(str), fetchNominatim(str)]);
+    const [census, nominatim] = await Promise.race([
+      othersP,
+      new Promise(resolve => setTimeout(() => resolve([[], []]), 3000)),
+    ]);
+    const alts = [...census, ...nominatim];
+    return [...serper, ...alts];
+  }
+
+  // Step 2: Serper failed/empty — fall back to existing parallel strategy
   const googleP = facilityName ? fetchGoogle(facilityName, str) : Promise.resolve([]);
   const censusP = fetchCensus(str);
   const nominatimP = fetchNominatim(str);
 
-  // Wait for fast geocoders (Census + Nominatim typically ~1-2s)
   const [census, nominatim] = await Promise.all([censusP, nominatimP]);
   const fallback = census.length > 0 ? census : (nominatim.length > 0 ? nominatim : []);
 
   if (fallback.length > 0) {
-    // Have backup — give Google limited extra time (8s) to beat the fallback
     const google = await Promise.race([
       googleP,
       new Promise(resolve => setTimeout(() => resolve([]), 8000)),
@@ -900,7 +930,6 @@ async function geocodeAddress(str, facilityName = '') {
     return fallback;
   }
 
-  // No fallback — wait for Google fully (it's the only hope)
   const google = await googleP;
   if (google.length > 0) return google;
   throw new Error('No results found for this address');
@@ -930,6 +959,7 @@ async function resolveLocation(input) {
 
 function _sourceBadge(source) {
   const badges = {
+    serper:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-700/60 text-emerald-200">Serper</span>',
     google:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-700/60 text-green-200">Google</span>',
     census:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-700/60 text-blue-200">Census</span>',
     nominatim:   '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-700/60 text-amber-200">Nominatim</span>',

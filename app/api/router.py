@@ -66,6 +66,13 @@ async def shutdown_browser():
     logger.info("Browser shut down")
 
 
+async def _get_setting(db: AsyncSession, key: str) -> str | None:
+    """Read a single setting value from the DB."""
+    result = await db.execute(select(Setting).where(Setting.key == key))
+    setting = result.scalar_one_or_none()
+    return setting.value if setting else None
+
+
 api_router = APIRouter(prefix="/api")
 
 # Include sub-routers
@@ -83,13 +90,18 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
     rows = result.scalars().all()
     settings_dict = {s.key: s.value for s in rows}
 
-    # Mask API key for security
+    # Mask API keys for security
     api_key = settings_dict.get("openai_api_key", "")
     if api_key and len(api_key) > 8:
         api_key = api_key[:4] + "..." + api_key[-4:]
 
+    serper_key = settings_dict.get("serper_api_key", "")
+    if serper_key and len(serper_key) > 8:
+        serper_key = serper_key[:4] + "..." + serper_key[-4:]
+
     return SettingsResponse(
         openai_api_key=api_key,
+        serper_api_key=serper_key,
         validation_model=settings_dict.get("validation_model", ""),
         boundary_model=settings_dict.get("boundary_model", ""),
         default_zoom=settings_dict.get("default_zoom", ""),
@@ -138,6 +150,41 @@ async def geocode_census(address: str = Query(...)):
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(url, params=params)
     return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
+
+@api_router.get("/geocode/serper")
+async def geocode_serper(q: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Geocode via Serper Dev Places API — fast, accurate Google Places data."""
+    key = await _get_setting(db, "serper_api_key")
+    if not key:
+        return JSONResponse(content={"results": []})
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            "https://google.serper.dev/places",
+            headers={"X-API-KEY": key, "Content-Type": "application/json"},
+            json={"q": q},
+        )
+
+    if resp.status_code != 200:
+        logger.warning("Serper API error %d for query: %s", resp.status_code, q)
+        return JSONResponse(content={"results": [], "error": f"Serper {resp.status_code}"})
+
+    places = resp.json().get("places", [])
+    results = []
+    for p in places:
+        if p.get("latitude") is not None and p.get("longitude") is not None:
+            results.append({
+                "lat": p["latitude"],
+                "lng": p["longitude"],
+                "display_name": f"{p.get('title', '')} — {p.get('address', '')}".strip(" —"),
+                "source": "serper",
+                "address": p.get("address"),
+                "category": p.get("category"),
+                "phone": p.get("phoneNumber"),
+                "rating": p.get("rating"),
+            })
+    return JSONResponse(content={"results": results})
 
 
 @api_router.get("/geocode/google-search")
