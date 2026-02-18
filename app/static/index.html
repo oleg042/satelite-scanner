@@ -395,15 +395,15 @@ async function api(method, path, body) {
 // --- Toast ---
 function toast(msg, type = 'success') {
   const el = document.createElement('div');
-  const colors = type === 'success' ? 'bg-green-600' : 'bg-red-600';
-  el.className = `toast ${colors} text-white text-sm px-4 py-2 rounded shadow-lg max-w-sm`;
+  const colors = type === 'success' ? 'bg-green-600' : type === 'info' ? 'bg-blue-600' : 'bg-red-600';
+  el.className = `toast ${colors} text-white text-sm px-4 py-2 rounded shadow-lg max-w-md`;
   el.textContent = msg;
   document.getElementById('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 4000);
+  setTimeout(() => el.remove(), type === 'success' ? 4000 : 8000);
 }
 
 // --- Status badge ---
-function statusBadge(status) {
+function statusBadge(status, scanId) {
   const map = {
     pending: 'bg-purple-700 text-purple-100',
     queued: 'bg-gray-600 text-gray-100',
@@ -417,7 +417,17 @@ function statusBadge(status) {
   };
   const cls = map[status] || 'bg-gray-600 text-gray-100';
   const label = (status || '').replace(/_/g, ' ');
+  if ((status === 'failed' || status === 'skipped') && scanId) {
+    return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium cursor-pointer hover:brightness-125 ${cls}" onclick="event.stopPropagation(); showScanReason('${scanId}')" title="Click to see details">${label}</span>`;
+  }
   return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}">${label}</span>`;
+}
+
+function showScanReason(scanId) {
+  const scan = S.scans.find(s => s.id === scanId);
+  if (!scan) return;
+  const msg = scan.error_message || scan.skip_reason || 'No details available';
+  toast(msg, scan.status === 'failed' ? 'error' : 'info');
 }
 
 // --- Format helpers ---
@@ -535,7 +545,7 @@ function renderTable() {
       <td class="px-3 py-2 font-medium">${esc(scan.facility_name || '-')}</td>
       <td class="px-3 py-2 text-gray-400 max-w-[14rem] truncate" title="${esc(scan.facility_address || '')}">${esc(scan.facility_address || '-')}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
-      <td class="px-3 py-2">${statusBadge(scan.status)}</td>
+      <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
       <td class="px-3 py-2 text-center">${fmtAI(scan)}</td>
       <td class="px-3 py-2 text-gray-400 max-w-[10rem] truncate" title="${esc(scan.ai_facility_type || '')}">${fmtType(scan.ai_facility_type)}</td>
