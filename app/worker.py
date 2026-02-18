@@ -14,25 +14,21 @@ logger = logging.getLogger(__name__)
 scan_queue: asyncio.Queue = asyncio.Queue()
 
 
-async def enqueue_scan(scan_id: UUID, facility_name: str, lat: float, lng: float):
+async def enqueue_scan(scan_id: UUID):
     """Add a scan job to the queue."""
-    await scan_queue.put((scan_id, facility_name, lat, lng))
-    logger.info("Enqueued scan %s (%s) — queue size: %d", scan_id, facility_name, scan_queue.qsize())
+    await scan_queue.put(scan_id)
+    logger.info("Enqueued scan %s — queue size: %d", scan_id, scan_queue.qsize())
 
 
 async def _worker(worker_id: int):
     """Single worker coroutine — pulls jobs from the shared queue."""
     logger.info("Worker %d ready", worker_id)
     while True:
-        scan_id, facility_name, lat, lng = await scan_queue.get()
-        if lat is None or lng is None:
-            logger.warning("[W%d] Skipping scan %s — no coordinates", worker_id, scan_id)
-            scan_queue.task_done()
-            continue
-        logger.info("[W%d] Processing scan %s (%s)...", worker_id, scan_id, facility_name)
+        scan_id = await scan_queue.get()
+        logger.info("[W%d] Processing scan %s...", worker_id, scan_id)
         try:
             async with async_session() as db:
-                await run_pipeline(scan_id, facility_name, lat, lng, db)
+                await run_pipeline(scan_id, db)
         except Exception:
             logger.exception("[W%d] Worker error for scan %s", worker_id, scan_id)
         finally:

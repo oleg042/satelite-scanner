@@ -51,17 +51,46 @@ async def _init_db():
     except Exception as e:
         logger.info("Enum migration skipped (fresh DB or already done): %s", e)
 
-    # 2. Column migration — can be in a transaction
+    # 2. Merge facilities → scans migration (idempotent, guarded)
     async with engine.begin() as conn:
-        try:
-            await conn.execute(text(
-                "ALTER TABLE facilities ALTER COLUMN lat DROP NOT NULL"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE facilities ALTER COLUMN lng DROP NOT NULL"
-            ))
-        except Exception:
-            pass  # Table doesn't exist yet (fresh DB) — create_all handles it
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+              IF EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_name = 'facilities' AND table_schema = 'public') THEN
+
+                -- Add new columns to scans
+                ALTER TABLE scans ADD COLUMN IF NOT EXISTS facility_name TEXT;
+                ALTER TABLE scans ADD COLUMN IF NOT EXISTS facility_address TEXT;
+                ALTER TABLE scans ADD COLUMN IF NOT EXISTS lat FLOAT;
+                ALTER TABLE scans ADD COLUMN IF NOT EXISTS lng FLOAT;
+
+                -- Backfill from facilities
+                UPDATE scans SET
+                  facility_name = f.name,
+                  facility_address = f.address,
+                  lat = f.lat,
+                  lng = f.lng
+                FROM facilities f WHERE scans.facility_id = f.id;
+
+                -- Recover orphaned facilities as pending scans
+                INSERT INTO scans (id, facility_name, facility_address, lat, lng, status)
+                SELECT id, name, address, lat, lng, 'pending'::scan_status
+                FROM facilities f WHERE NOT EXISTS (SELECT 1 FROM scans s WHERE s.facility_id = f.id);
+
+                -- Handle NULLs, then set NOT NULL
+                UPDATE scans SET facility_name = 'Unknown' WHERE facility_name IS NULL;
+                ALTER TABLE scans ALTER COLUMN facility_name SET NOT NULL;
+
+                -- Drop FK, column, and table
+                ALTER TABLE scans DROP CONSTRAINT IF EXISTS scans_facility_id_fkey;
+                ALTER TABLE scans DROP COLUMN IF EXISTS facility_id;
+                DROP TABLE IF EXISTS facilities;
+
+                RAISE NOTICE 'facilities table merged into scans';
+              END IF;
+            END $$;
+        """))
 
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ready")

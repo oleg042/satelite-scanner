@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Facility, Scan, ScanStatus, ScanStep, Screenshot
+from app.models import Scan, ScanStatus, ScanStep, Screenshot
 from app.schemas import (
     BatchScanRequest,
     BulkImportRequest,
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _scan_to_response(scan: Scan, facility_name: str = "", facility_address: str | None = None, facility_lat: float | None = None, facility_lng: float | None = None, base_url: str = "") -> ScanResponse:
+def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
     """Convert Scan ORM to ScanResponse with screenshot URLs."""
     screenshots = []
     for ss in scan.screenshots:
@@ -42,11 +42,10 @@ def _scan_to_response(scan: Scan, facility_name: str = "", facility_address: str
 
     return ScanResponse(
         id=scan.id,
-        facility_id=scan.facility_id,
-        facility_name=facility_name,
-        facility_address=facility_address,
-        facility_lat=facility_lat,
-        facility_lng=facility_lng,
+        facility_name=scan.facility_name,
+        facility_address=scan.facility_address,
+        facility_lat=scan.lat,
+        facility_lng=scan.lng,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
         method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
         zoom=scan.zoom,
@@ -78,31 +77,14 @@ def _scan_to_response(scan: Scan, facility_name: str = "", facility_address: str
     )
 
 
-async def _get_or_create_facility(
-    db: AsyncSession, name: str, lat: float, lng: float, address: str | None = None
-) -> Facility:
-    """Find existing facility by coords or create a new one."""
-    result = await db.execute(
-        select(Facility).where(Facility.lat == lat, Facility.lng == lng)
-    )
-    facility = result.scalar_one_or_none()
-    if facility:
-        return facility
-
-    facility = Facility(name=name, lat=lat, lng=lng, address=address)
-    db.add(facility)
-    await db.commit()
-    await db.refresh(facility)
-    return facility
-
-
 @router.post("/scan", response_model=ScanSubmitted, status_code=202)
 async def submit_scan(req: ScanRequest, db: AsyncSession = Depends(get_db)):
     """Submit a single facility for scanning."""
-    facility = await _get_or_create_facility(db, req.name, req.lat, req.lng, req.address)
-
     scan = Scan(
-        facility_id=facility.id,
+        facility_name=req.name,
+        facility_address=req.address,
+        lat=req.lat,
+        lng=req.lng,
         zoom=req.zoom,
         buffer_m=req.buffer_m,
     )
@@ -110,9 +92,9 @@ async def submit_scan(req: ScanRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(scan)
 
-    await enqueue_scan(scan.id, facility.name, facility.lat, facility.lng)
+    await enqueue_scan(scan.id)
 
-    return ScanSubmitted(scan_id=scan.id, facility_id=facility.id)
+    return ScanSubmitted(scan_id=scan.id)
 
 
 @router.post("/scan/batch", response_model=list[ScanSubmitted], status_code=202)
@@ -120,9 +102,11 @@ async def submit_batch(req: BatchScanRequest, db: AsyncSession = Depends(get_db)
     """Submit up to 50 facilities for scanning."""
     results = []
     for item in req.facilities:
-        facility = await _get_or_create_facility(db, item.name, item.lat, item.lng, item.address)
         scan = Scan(
-            facility_id=facility.id,
+            facility_name=item.name,
+            facility_address=item.address,
+            lat=item.lat,
+            lng=item.lng,
             zoom=item.zoom,
             buffer_m=item.buffer_m,
         )
@@ -130,8 +114,8 @@ async def submit_batch(req: BatchScanRequest, db: AsyncSession = Depends(get_db)
         await db.commit()
         await db.refresh(scan)
 
-        await enqueue_scan(scan.id, facility.name, facility.lat, facility.lng)
-        results.append(ScanSubmitted(scan_id=scan.id, facility_id=facility.id))
+        await enqueue_scan(scan.id)
+        results.append(ScanSubmitted(scan_id=scan.id))
 
     return results
 
@@ -141,15 +125,17 @@ async def import_facilities(req: BulkImportRequest, db: AsyncSession = Depends(g
     """Import facilities by name/address — no coordinates, no worker queue."""
     results = []
     for item in req.facilities:
-        facility = Facility(name=item.name, address=item.address, lat=None, lng=None)
-        db.add(facility)
-        await db.flush()
-
-        scan = Scan(facility_id=facility.id, status=ScanStatus.pending)
+        scan = Scan(
+            facility_name=item.name,
+            facility_address=item.address,
+            lat=None,
+            lng=None,
+            status=ScanStatus.pending,
+        )
         db.add(scan)
         await db.flush()
 
-        results.append(ScanSubmitted(scan_id=scan.id, facility_id=facility.id, status="pending"))
+        results.append(ScanSubmitted(scan_id=scan.id, status="pending"))
 
     await db.commit()
     return results
@@ -161,8 +147,7 @@ async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     scan = await db.get(Scan, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    facility = await db.get(Facility, scan.facility_id)
-    return _scan_to_response(scan, facility_name=facility.name if facility else "", facility_address=facility.address if facility else None, facility_lat=facility.lat if facility else None, facility_lng=facility.lng if facility else None)
+    return _scan_to_response(scan)
 
 
 @router.get("/scans", response_model=list[ScanResponse])
@@ -176,9 +161,7 @@ async def list_scans(
     db: AsyncSession = Depends(get_db),
 ):
     """List scans with optional filtering and facility name/address search."""
-    q = select(Scan, Facility.name.label("facility_name"), Facility.address.label("facility_address"), Facility.lat.label("facility_lat"), Facility.lng.label("facility_lng")).join(
-        Facility, Scan.facility_id == Facility.id, isouter=True
-    ).order_by(Scan.started_at.desc().nullslast(), Facility.created_at.desc())
+    q = select(Scan).order_by(Scan.started_at.desc().nullslast())
 
     if status:
         q = q.where(Scan.status == status)
@@ -187,12 +170,12 @@ async def list_scans(
     if method:
         q = q.where(Scan.method == method)
     if search:
-        q = q.where(Facility.name.ilike(f"%{search}%") | Facility.address.ilike(f"%{search}%"))
+        q = q.where(Scan.facility_name.ilike(f"%{search}%") | Scan.facility_address.ilike(f"%{search}%"))
 
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
-    rows = result.all()
-    return [_scan_to_response(row[0], facility_name=row[1] or "", facility_address=row[2], facility_lat=row[3], facility_lng=row[4]) for row in rows]
+    scans = result.scalars().all()
+    return [_scan_to_response(scan) for scan in scans]
 
 
 @router.delete("/scans", status_code=200)
@@ -233,8 +216,6 @@ async def get_scan_steps(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
-    facility = await db.get(Facility, scan.facility_id)
-
     steps = []
     total_ai_tokens = 0
     for step in scan.steps:
@@ -268,9 +249,9 @@ async def get_scan_steps(scan_id: UUID, db: AsyncSession = Depends(get_db)):
 
     return ScanTraceResponse(
         scan_id=scan.id,
-        facility_name=facility.name if facility else "unknown",
-        lat=facility.lat if facility else None,
-        lng=facility.lng if facility else None,
+        facility_name=scan.facility_name,
+        lat=scan.lat,
+        lng=scan.lng,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
         method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
         started_at=scan.started_at,

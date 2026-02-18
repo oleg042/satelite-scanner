@@ -18,7 +18,6 @@ from app.config import settings as app_settings
 from app.scanner.vision import DEFAULT_VALIDATION_PROMPT, _load_default_boundary_prompt
 from app.worker import scan_queue
 
-from app.api.facilities import router as facilities_router
 from app.api.scans import router as scans_router
 from app.api.screenshots import router as screenshots_router
 
@@ -77,7 +76,6 @@ api_router = APIRouter(prefix="/api")
 
 # Include sub-routers
 api_router.include_router(scans_router)
-api_router.include_router(facilities_router)
 api_router.include_router(screenshots_router)
 
 

@@ -13,7 +13,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -54,25 +53,14 @@ class ScreenshotType(str, enum.Enum):
 
 # --- Models ---
 
-class Facility(Base):
-    __tablename__ = "facilities"
-    __table_args__ = (UniqueConstraint("lat", "lng", name="uq_facility_coords"),)
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(Text, nullable=False)
-    lat = Column(Float, nullable=True)
-    lng = Column(Float, nullable=True)
-    address = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    scans = relationship("Scan", back_populates="facility", lazy="selectin")
-
-
 class Scan(Base):
     __tablename__ = "scans"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
+    facility_name = Column(Text, nullable=False, default="Unknown")
+    facility_address = Column(Text, nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     status = Column(Enum(ScanStatus, name="scan_status"), default=ScanStatus.queued)
     method = Column(Enum(ScanMethod, name="scan_method"), nullable=True)
 
@@ -116,7 +104,6 @@ class Scan(Base):
     ai_duration_ms = Column(Integer, nullable=True)
     tile_duration_ms = Column(Integer, nullable=True)
 
-    facility = relationship("Facility", back_populates="scans")
     screenshots = relationship("Screenshot", back_populates="scan", lazy="selectin")
     steps = relationship("ScanStep", back_populates="scan", lazy="selectin", order_by="ScanStep.step_number")
 

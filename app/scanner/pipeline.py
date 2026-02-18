@@ -159,11 +159,24 @@ async def _downscale_overview(
     logger.info("Downscaled %s screenshot to %dx%d (%dKB)", screenshot_type.value, max_width, new_height, new_size // 1024)
 
 
-async def run_pipeline(scan_id, facility_name: str, lat: float, lng: float, db: AsyncSession):
+async def run_pipeline(scan_id, db: AsyncSession):
     """Execute the full waterfall pipeline for a single scan."""
     scan = await db.get(Scan, scan_id)
     if not scan:
         logger.error("Scan %s not found", scan_id)
+        return
+
+    # Read facility info from the scan row
+    facility_name = scan.facility_name
+    lat = scan.lat
+    lng = scan.lng
+
+    if lat is None or lng is None:
+        logger.warning("Skipping scan %s — no coordinates", scan_id)
+        scan.status = ScanStatus.failed
+        scan.error_message = "No coordinates available"
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()
         return
 
     scan.started_at = datetime.now(timezone.utc)

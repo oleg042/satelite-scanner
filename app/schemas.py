@@ -63,7 +63,6 @@ class ScreenshotResponse(BaseModel):
 
 class ScanResponse(BaseModel):
     id: UUID
-    facility_id: UUID
     facility_name: str = ""
     facility_address: Optional[str] = None
     facility_lat: Optional[float] = None
@@ -102,20 +101,7 @@ class ScanResponse(BaseModel):
 
 class ScanSubmitted(BaseModel):
     scan_id: UUID
-    facility_id: UUID
     status: str = "queued"
-
-
-class FacilityResponse(BaseModel):
-    id: UUID
-    name: str
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    address: Optional[str] = None
-    created_at: datetime
-    scan_count: int = 0
-
-    model_config = {"from_attributes": True}
 
 
 class SettingsResponse(BaseModel):
