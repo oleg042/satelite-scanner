@@ -16,7 +16,7 @@ import re
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -79,14 +79,15 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^\w\-]", "_", name).strip("_")
 
 
-def _save_image(image, name: str, suffix: str, zoom: int) -> str:
+def _save_image(image, name: str, suffix: str, zoom: int, scan_id=None) -> str:
     """Save image to volume, return relative path."""
     safe = _safe_name(name)
     rel_dir = os.path.join("screenshots", safe)
     abs_dir = os.path.join(settings.volume_path, rel_dir)
     os.makedirs(abs_dir, exist_ok=True)
 
-    filename = f"{safe}_{suffix}_z{zoom}.png"
+    id_tag = f"_{str(scan_id)[:8]}" if scan_id else ""
+    filename = f"{safe}_{suffix}_z{zoom}{id_tag}.png"
     abs_path = os.path.join(abs_dir, filename)
     image.save(abs_path)
 
@@ -181,7 +182,13 @@ async def run_pipeline(scan_id, db: AsyncSession):
         await db.commit()
         return
 
+    # Clear any old steps/screenshots from a previous run of this scan
+    await db.execute(delete(ScanStep).where(ScanStep.scan_id == scan_id))
+    await db.execute(delete(Screenshot).where(Screenshot.scan_id == scan_id))
+    scan.error_message = None
     scan.started_at = datetime.now(timezone.utc)
+    await db.commit()
+
     config = await _get_scan_config(db, scan)
     cache = TileCache()
     zoom = config["zoom"]
@@ -269,7 +276,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
             if ov_img:
                 rel_path, filename, abs_path = _save_image(
-                    ov_img, facility_name, "overview", overview_zoom
+                    ov_img, facility_name, "overview", overview_zoom, scan_id
                 )
                 await _record_screenshot(
                     db, scan_id, ScreenshotType.overview,
@@ -377,7 +384,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
             if ov_img and ov_grid:
                 rel_path, filename, abs_path = _save_image(
-                    ov_img, facility_name, "ai_overview", overview_zoom
+                    ov_img, facility_name, "ai_overview", overview_zoom, scan_id
                 )
                 await _record_screenshot(
                     db, scan_id, ScreenshotType.ai_overview,
@@ -653,7 +660,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
             detail_img.close()
 
             rel_path, filename, abs_path = _save_image(
-                cropped, facility_name, "final", zoom
+                cropped, facility_name, "final", zoom, scan_id
             )
             scan.image_width = cropped.width
             scan.image_height = cropped.height

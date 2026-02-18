@@ -691,10 +691,14 @@ function renderDetail(scan) {
       const dur = step.duration_ms != null ? `(${(step.duration_ms / 1000).toFixed(1)}s)` : '';
       const dec = step.decision || '';
       const stepColor = step.status === 'failed' ? 'text-red-400' : 'text-green-400';
+      const stepTime = step.completed_at ? fmtDate(step.completed_at) : (step.started_at ? fmtDate(step.started_at) : '');
       html += `<div class="bg-gray-900 rounded px-3 py-2 text-sm">
-        <span class="text-gray-500">Step ${step.step_number}:</span>
-        <span class="font-medium">${esc(step.step_name.replace(/_/g, ' '))}</span>
-        <span class="text-gray-500">${dur}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-gray-500">Step ${step.step_number}:</span>
+          <span class="font-medium">${esc(step.step_name.replace(/_/g, ' '))}</span>
+          <span class="text-gray-500">${dur}</span>
+          ${stepTime ? `<span class="text-gray-600 text-xs ml-auto">${stepTime}</span>` : ''}
+        </div>
         <span class="${stepColor}"> &rarr; ${esc(dec)}</span>`;
 
       if (step.ai_tokens_total) {
@@ -815,6 +819,8 @@ async function scanSelected() {
     let msg = `Queued ${res.queued} scan${res.queued !== 1 ? 's' : ''}`;
     if (res.skipped_no_coords > 0) msg += ` (${res.skipped_no_coords} skipped — no coords)`;
     toast(msg);
+    // Invalidate trace cache for re-queued scans
+    ids.forEach(id => { delete S.expanded[id]; });
     S.selected.clear();
     updateSelectionBtns();
     fetchScans();
@@ -838,6 +844,8 @@ async function scanAllPending() {
     let msg = `Queued ${res.queued} pending scan${res.queued !== 1 ? 's' : ''}`;
     if (res.skipped_no_coords > 0) msg += ` (${res.skipped_no_coords} skipped — no coords)`;
     toast(msg);
+    // Invalidate all trace caches since we don't know which scans were pending
+    S.expanded = {};
     fetchScans();
     fetchHealth();
   } catch (e) {
@@ -862,7 +870,13 @@ async function fetchScans() {
   params.set('offset', S.offset);
 
   try {
-    S.scans = await api('GET', `/api/scans?${params}`);
+    const newScans = await api('GET', `/api/scans?${params}`);
+    // Invalidate trace cache for scans whose status changed (e.g. completed a re-scan)
+    const oldMap = Object.fromEntries(S.scans.map(s => [s.id, s.status]));
+    newScans.forEach(s => {
+      if (oldMap[s.id] && oldMap[s.id] !== s.status) delete S.expanded[s.id];
+    });
+    S.scans = newScans;
     renderTable();
     managePoll();
   } catch (e) {
