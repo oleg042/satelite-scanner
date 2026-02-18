@@ -16,6 +16,8 @@ import re
 import time
 from datetime import datetime, timezone
 
+import httpx
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -93,6 +95,32 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "boundary_prompt": boundary_prompt,
         "verification_prompt": verification_prompt,
     }
+
+
+async def _re_geocode(db: AsyncSession, facility_name: str, address: str) -> tuple[float, float] | None:
+    """Try to re-geocode via Serper. Returns (lat, lng) or None on failure."""
+    key = await _get_setting(db, "serper_api_key")
+    if not key:
+        return None
+    q = " ".join(filter(None, [facility_name, address]))
+    if not q.strip():
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://google.serper.dev/places",
+                headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                json={"q": q},
+            )
+        if resp.status_code != 200:
+            logger.warning("Serper re-geocode failed with status %d", resp.status_code)
+            return None
+        places = resp.json().get("places", [])
+        if places and places[0].get("latitude") is not None:
+            return (places[0]["latitude"], places[0]["longitude"])
+    except Exception as e:
+        logger.warning("Serper re-geocode error: %s", e)
+    return None
 
 
 def _safe_name(name: str) -> str:
@@ -193,6 +221,21 @@ async def run_pipeline(scan_id, db: AsyncSession):
     facility_name = scan.facility_name
     lat = scan.lat
     lng = scan.lng
+
+    # Re-geocode via Serper if address is available (fixes stale coords from older geocoders)
+    if scan.facility_address:
+        new_coords = await _re_geocode(db, facility_name, scan.facility_address)
+        if new_coords:
+            new_lat, new_lng = new_coords
+            if abs(new_lat - (lat or 0)) > 0.0005 or abs(new_lng - (lng or 0)) > 0.0005:
+                logger.info(
+                    "Re-geocode updated coords for scan %s: (%.6f, %.6f) → (%.6f, %.6f)",
+                    scan_id, lat or 0, lng or 0, new_lat, new_lng,
+                )
+            lat, lng = new_lat, new_lng
+            scan.lat = lat
+            scan.lng = lng
+            await db.commit()
 
     if lat is None or lng is None:
         logger.warning("Skipping scan %s — no coordinates", scan_id)
