@@ -264,7 +264,7 @@
         <!-- Models -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label class="block text-sm text-gray-300 mb-1.5">Validation Model</label>
               <select id="set-validation-model"
@@ -309,7 +309,30 @@
                   <option value="gpt-4.1-nano">GPT-4.1 Nano (cheapest)</option>
                 </optgroup>
               </select>
-              <p class="text-xs text-gray-600 mt-1">Used for AI vision fallback (step 3)</p>
+              <p class="text-xs text-gray-600 mt-1">Used for boundary detection + correction (step 3)</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Verification Model</label>
+              <select id="set-verification-model"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="">Select model...</option>
+                <optgroup label="Flagship">
+                  <option value="gpt-5.2">GPT-5.2 (Latest flagship)</option>
+                  <option value="gpt-5.1">GPT-5.1</option>
+                  <option value="gpt-5">GPT-5</option>
+                  <option value="gpt-4.1">GPT-4.1 (1M context)</option>
+                </optgroup>
+                <optgroup label="Reasoning">
+                  <option value="o3">o3 (Visual reasoning)</option>
+                  <option value="o3-pro">o3 Pro (Most reliable)</option>
+                </optgroup>
+                <optgroup label="Efficient">
+                  <option value="gpt-5-mini">GPT-5 Mini</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 Mini (1M context)</option>
+                  <option value="gpt-4.1-nano">GPT-4.1 Nano (cheapest)</option>
+                </optgroup>
+              </select>
+              <p class="text-xs text-gray-600 mt-1">Used for boundary verification (step 3d)</p>
             </div>
           </div>
         </div>
@@ -1089,6 +1112,7 @@ async function loadSettings() {
     document.getElementById('set-serper-key-mask').textContent = s.serper_api_key || 'not set';
     document.getElementById('set-validation-model').value = s.validation_model || '';
     document.getElementById('set-boundary-model').value = s.boundary_model || '';
+    document.getElementById('set-verification-model').value = s.verification_model || '';
     document.getElementById('set-default-zoom').value = s.default_zoom || '';
     document.getElementById('set-buffer').value = s.default_buffer_m || '';
     document.getElementById('set-overview-zoom').value = s.overview_zoom || '';
@@ -1120,6 +1144,8 @@ async function saveSettings(e) {
   if (vm) body.validation_model = vm;
   const bm = document.getElementById('set-boundary-model').value.trim();
   if (bm) body.boundary_model = bm;
+  const vfm = document.getElementById('set-verification-model').value.trim();
+  if (vfm) body.verification_model = vfm;
   const dz = document.getElementById('set-default-zoom').value.trim();
   if (dz) body.default_zoom = dz;
   const buf = document.getElementById('set-buffer').value.trim();
