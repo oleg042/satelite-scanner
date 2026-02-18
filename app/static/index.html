@@ -884,7 +884,14 @@ async function fetchScans() {
     // Invalidate trace cache for scans whose status changed (e.g. completed a re-scan)
     const oldMap = Object.fromEntries(S.scans.map(s => [s.id, s.status]));
     newScans.forEach(s => {
-      if (oldMap[s.id] && oldMap[s.id] !== s.status) delete S.expanded[s.id];
+      if (oldMap[s.id] && oldMap[s.id] !== s.status) {
+        delete S.expanded[s.id];
+        if (S.expandedOpen[s.id]) {
+          api('GET', `/api/scan/${s.id}/steps`)
+            .then(trace => { S.expanded[s.id] = trace; renderTable(); })
+            .catch(e => { S.expanded[s.id] = { steps: [], error: e.message }; renderTable(); });
+        }
+      }
     });
     S.scans = newScans;
     renderTable();
@@ -985,6 +992,15 @@ async function saveSettings(e) {
 
 // --- Geocoding ---
 function parseGoogleMapsUrl(str) {
+  // Prefer exact place pin (!3d<lat>!4d<lng>) over viewport center (@lat,lng)
+  const placeMatch = str.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
+  if (placeMatch) {
+    const lat = parseFloat(placeMatch[1]);
+    const lng = parseFloat(placeMatch[2]);
+    if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180)
+      return { lat, lng };
+  }
+  // Fallback to viewport center
   const match = str.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
   if (!match) return null;
   const lat = parseFloat(match[1]);

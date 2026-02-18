@@ -43,6 +43,26 @@ from app.scanner.vision import detect_facility_boundary, validate_osm_bbox, veri
 logger = logging.getLogger(__name__)
 
 
+def _is_fatal_ai_error(exc: Exception) -> bool:
+    """Check if an OpenAI error is fatal (billing/auth) vs transient (network/rate-limit).
+
+    Fatal errors should abort the scan rather than silently falling back.
+    """
+    try:
+        import openai
+        if isinstance(exc, openai.AuthenticationError):
+            return True
+        if isinstance(exc, openai.RateLimitError):
+            # insufficient_quota = billing issue (fatal), rate_limit_exceeded = transient
+            code = getattr(exc, "code", None) or ""
+            return "insufficient_quota" in str(code)
+        if isinstance(exc, openai.PermissionDeniedError):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
 async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
     """Get a setting value from the database."""
     result = await db.execute(select(Setting.value).where(Setting.key == key))
@@ -186,6 +206,20 @@ async def run_pipeline(scan_id, db: AsyncSession):
     await db.execute(delete(ScanStep).where(ScanStep.scan_id == scan_id))
     await db.execute(delete(Screenshot).where(Screenshot.scan_id == scan_id))
     scan.error_message = None
+    scan.method = None
+    scan.osm_building_count = None
+    scan.osm_building_id = None
+    scan.bbox_min_lat = scan.bbox_min_lng = None
+    scan.bbox_max_lat = scan.bbox_max_lng = None
+    scan.bbox_width_m = scan.bbox_height_m = None
+    scan.ai_confidence = scan.ai_facility_type = None
+    scan.ai_building_count = scan.ai_notes = None
+    scan.ai_validated = None
+    scan.tile_count = scan.tiles_downloaded = None
+    scan.image_width = scan.image_height = None
+    scan.skip_reason = None
+    scan.osm_duration_ms = scan.ai_duration_ms = scan.tile_duration_ms = None
+    scan.completed_at = None
     scan.started_at = datetime.now(timezone.utc)
     await db.commit()
 
@@ -296,6 +330,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         config["validation_prompt"],
                     )
                 except Exception as e:
+                    if _is_fatal_ai_error(e):
+                        raise RuntimeError(f"OpenAI API account error: {e}") from e
                     validation_error = str(e)
                     logger.warning("Validation call failed: %s", e)
 
@@ -404,6 +440,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         config["boundary_prompt"],
                     )
                 except Exception as e:
+                    if _is_fatal_ai_error(e):
+                        raise RuntimeError(f"OpenAI API account error: {e}") from e
                     boundary_error = str(e)
                     logger.warning("Boundary detection failed: %s", e)
 
@@ -480,6 +518,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                             config["verification_prompt"],
                         )
                     except Exception as e:
+                        if _is_fatal_ai_error(e):
+                            raise RuntimeError(f"OpenAI API account error: {e}") from e
                         verification_error = str(e)
                         logger.warning("Verification call failed: %s", e)
 
@@ -519,6 +559,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                                 retry_prompt,
                             )
                         except Exception as e:
+                            if _is_fatal_ai_error(e):
+                                raise RuntimeError(f"OpenAI API account error: {e}") from e
                             boundary = None
                             logger.warning("Boundary retry failed: %s", e)
 
