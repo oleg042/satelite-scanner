@@ -545,7 +545,11 @@ function renderTable() {
   tbody.innerHTML = html;
 
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
-    row.addEventListener('click', () => toggleRow(row.dataset.id));
+    row.addEventListener('click', () => {
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) return;
+      toggleRow(row.dataset.id);
+    });
   });
 
   // Checkbox handlers (with shift-click range selection)
