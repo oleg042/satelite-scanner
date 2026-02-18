@@ -39,7 +39,7 @@ from app.scanner.osm import (
 from PIL import Image as PILImage
 
 from app.scanner.tiles import capture_area, crop_to_bbox
-from app.scanner.vision import detect_facility_boundary, validate_osm_bbox, verify_facility_boundary
+from app.scanner.vision import correct_facility_boundary, detect_facility_boundary, validate_osm_bbox, verify_facility_boundary
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,8 @@ async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
 async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     """Resolve scan config: per-scan overrides > DB settings > env defaults."""
     api_key = await _get_setting(db, "openai_api_key", settings.openai_api_key)
-    validation_model = await _get_setting(db, "validation_model", "gpt-4o-mini")
-    boundary_model = await _get_setting(db, "boundary_model", "gpt-4o")
+    validation_model = await _get_setting(db, "validation_model", "gpt-5-mini")
+    boundary_model = await _get_setting(db, "boundary_model", "gpt-5.2")
     default_zoom = int(await _get_setting(db, "default_zoom", str(settings.default_zoom)))
     default_buffer = int(await _get_setting(db, "default_buffer_m", str(settings.default_buffer_m)))
     overview_zoom = int(await _get_setting(db, "overview_zoom", str(settings.overview_zoom)))
@@ -591,6 +591,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                                 "approved": verification.approved,
                                 "reason": verification.reason,
                                 "issues": verification.issues,
+                                "edge_feedback": verification.edge_feedback,
                                 "raw_response": verification.raw_response,
                                 "tokens": {
                                     "prompt": verification.usage.prompt_tokens,
@@ -607,33 +608,18 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
                         retries.append(rejected_attempt)
 
-                        # Build retry feedback with specific coords and image dims
-                        retry_extra = (
-                            f"\n\n## IMPORTANT CORRECTION (attempt {retry_count + 1})\n"
-                            f"A previous attempt returned this boundary:\n"
-                            f"  top_y={boundary.top_y}, bottom_y={boundary.bottom_y}, "
-                            f"left_x={boundary.left_x}, right_x={boundary.right_x}\n"
-                            f"  (on a {ov_img.width}x{ov_img.height} image)\n\n"
-                            f"This was rejected because: {verification.reason}\n"
-                            f"Specific issues: {verification.issues}\n\n"
-                            f"Adjust the boundary to fix these problems. For example:\n"
-                            f"- If a building was cut off, expand that edge.\n"
-                            f"- If the boundary was too wide, pull in the edges that include non-facility areas."
-                        )
-                        retry_prompt = (config["boundary_prompt"] or "") + retry_extra
-
+                        # Correct boundary using lightweight model (same tier as verification)
                         try:
                             boundary = await asyncio.to_thread(
-                                detect_facility_boundary,
-                                abs_path, facility_name, lat, lng, width_m, height_m,
-                                config["api_key"], config["boundary_model"],
-                                retry_prompt,
+                                correct_facility_boundary,
+                                abs_path, boundary, verification,
+                                config["api_key"], config["validation_model"],
                             )
                         except Exception as e:
                             if _is_fatal_ai_error(e):
                                 raise RuntimeError(f"OpenAI API account error: {e}") from e
                             boundary = None
-                            logger.warning("Boundary retry %d failed: %s", retry_count, e)
+                            logger.warning("Boundary correction %d failed: %s", retry_count, e)
                             break
 
                         if not boundary:

@@ -141,7 +141,7 @@ def validate_osm_bbox(
     width_m: float,
     height_m: float,
     api_key: str,
-    model: str = "gpt-4o-mini",
+    model: str,
     prompt_template: str = "",
 ) -> Optional[ValidationResult]:
     """Send overview image to GPT for OSM bbox validation.
@@ -211,7 +211,7 @@ def detect_facility_boundary(
     width_m: float,
     height_m: float,
     api_key: str,
-    model: str = "gpt-4o",
+    model: str,
     prompt_template: str = "",
 ) -> Optional[BoundaryResult]:
     """Send overview image to GPT for facility boundary detection.
@@ -310,14 +310,20 @@ The facility "{name}" should be centered in this image. A red rectangle has been
 
 Check the following:
 1. Is the target facility (the building/campus at or near the image center) FULLY inside the red rectangle, with no parts cut off at the edges?
-2. Does the rectangle tightly wrap the facility, or does it include large areas that clearly don't belong to this facility (e.g. neighboring properties, rail yards, highways, empty fields)?
+2. For each edge of the rectangle (top, bottom, left, right), assess whether it closely follows the facility boundary on that side. A small margin (10-20%) is acceptable. Note which specific edges, if any, extend too far and include areas clearly belonging to neighboring properties or unrelated to the facility.
 3. Is the rectangle centered roughly on the facility, or is it significantly shifted away from center?
 
 Respond with ONLY a JSON object:
 {{
   "approved": true/false,
   "reason": "brief explanation",
-  "issues": "any specific problems noticed (e.g. 'building cut off at bottom', 'includes rail yard')"
+  "issues": "summary of problems",
+  "edge_feedback": {{
+    "top": "ok or description of problem",
+    "bottom": "ok or description of problem",
+    "left": "ok or description of problem",
+    "right": "ok or description of problem"
+  }}
 }}"""
 
 
@@ -326,6 +332,7 @@ class VerificationResult:
     approved: bool
     reason: str
     issues: str
+    edge_feedback: dict = None
     raw_response: str = ""
     prompt_text: str = ""
     usage: Optional[TokenUsage] = None
@@ -336,7 +343,7 @@ def verify_facility_boundary(
     name: str,
     boundary: BoundaryResult,
     api_key: str,
-    model: str = "gpt-4o-mini",
+    model: str,
     prompt_template: str = "",
 ) -> Optional[VerificationResult]:
     """Draw detected bbox on overview image and ask a second model to verify it.
@@ -400,10 +407,175 @@ def verify_facility_boundary(
             approved=data.get("approved", False),
             reason=data.get("reason", ""),
             issues=data.get("issues", ""),
+            edge_feedback=data.get("edge_feedback"),
             raw_response=text,
             prompt_text=prompt,
             usage=usage,
         )
     except Exception as e:
         logger.error("Verification API error: %s", e)
+        raise
+
+
+DEFAULT_CORRECTION_PROMPT = """You are correcting a facility boundary on a satellite image.
+A red rectangle shows the current boundary that needs adjustment.
+
+Current boundary coordinates (pixels):
+  top_y={top_y}, bottom_y={bottom_y}, left_x={left_x}, right_x={right_x}
+  Image size: {img_w}x{img_h} pixels
+
+The boundary was REJECTED. Per-edge assessment:
+- TOP: {edge_top}
+- BOTTOM: {edge_bottom}
+- LEFT: {edge_left}
+- RIGHT: {edge_right}
+
+Instructions:
+- For edges marked "too far": Look at the image and pull that edge inward to closely
+  follow the facility's actual footprint on that side.
+- For edges where a building/area is "cut off": Push that edge outward to fully contain
+  the facility on that side.
+- For edges marked "ok": Keep the coordinate the same or very close.
+- Do NOT add buffer or padding — that is handled automatically in post-processing.
+
+Respond with ONLY a JSON object:
+{{"top_y": <int>, "bottom_y": <int>, "left_x": <int>, "right_x": <int>,
+  "reasoning": "<what you adjusted and why>", "confidence": "high/medium/low"}}"""
+
+
+def correct_facility_boundary(
+    image_path: str,
+    boundary: BoundaryResult,
+    verification: VerificationResult,
+    api_key: str,
+    model: str,
+) -> Optional[BoundaryResult]:
+    """Adjust an existing boundary using lightweight correction instead of full re-detection.
+
+    Uses the verifier's per-edge feedback to make targeted coordinate adjustments.
+    Much cheaper than a full detect_facility_boundary() call.
+
+    Returns a new BoundaryResult with adjusted coordinates, or None on error.
+    """
+    if not api_key:
+        return None
+
+    try:
+        # Draw the current boundary as a red rectangle on the image (same as verify)
+        img = Image.open(image_path).copy()
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        for offset in range(3):
+            draw.rectangle(
+                [boundary.left_x - offset, boundary.top_y - offset,
+                 boundary.right_x + offset, boundary.bottom_y + offset],
+                outline="red",
+            )
+
+        # Prepare image (downscale if needed)
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        orig_w, orig_h = img.size
+        img.close()
+
+        # Downscale annotated image for AI
+        max_long_side = 2048
+        long_side = max(orig_w, orig_h)
+        if long_side > max_long_side:
+            ratio = max_long_side / long_side
+            new_w = int(orig_w * ratio)
+            new_h = int(orig_h * ratio)
+            img2 = Image.open(io.BytesIO(buf.getvalue()))
+            resized = img2.resize((new_w, new_h), Image.LANCZOS)
+            img2.close()
+            buf2 = io.BytesIO()
+            resized.save(buf2, format="PNG")
+            resized.close()
+            img_b64 = base64.b64encode(buf2.getvalue()).decode("utf-8")
+            scale = orig_w / new_w
+            ai_w, ai_h = new_w, new_h
+            # Scale boundary coords down for the prompt
+            prompt_top = round(boundary.top_y / scale)
+            prompt_bottom = round(boundary.bottom_y / scale)
+            prompt_left = round(boundary.left_x / scale)
+            prompt_right = round(boundary.right_x / scale)
+        else:
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            scale = 1.0
+            ai_w, ai_h = orig_w, orig_h
+            prompt_top = boundary.top_y
+            prompt_bottom = boundary.bottom_y
+            prompt_left = boundary.left_x
+            prompt_right = boundary.right_x
+
+        # Extract per-edge feedback, falling back to general reason/issues
+        edge_fb = verification.edge_feedback or {}
+        fallback = verification.reason or verification.issues or "no details"
+        edge_top = edge_fb.get("top", fallback)
+        edge_bottom = edge_fb.get("bottom", fallback)
+        edge_left = edge_fb.get("left", fallback)
+        edge_right = edge_fb.get("right", fallback)
+
+        prompt = DEFAULT_CORRECTION_PROMPT.format(
+            top_y=prompt_top, bottom_y=prompt_bottom,
+            left_x=prompt_left, right_x=prompt_right,
+            img_w=ai_w, img_h=ai_h,
+            edge_top=edge_top, edge_bottom=edge_bottom,
+            edge_left=edge_left, edge_right=edge_right,
+        )
+
+        logger.info("Calling %s for boundary correction...", model)
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            max_completion_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        text = response.choices[0].message.content.strip()
+        logger.info("Correction response: %s", text)
+
+        usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            reasoning_tokens=getattr(response.usage.completion_tokens_details, "reasoning_tokens", 0) or 0,
+            total_tokens=response.usage.total_tokens,
+        )
+
+        data = _parse_json_response(text)
+
+        # Scale pixel coords back to original image space
+        if scale != 1.0:
+            data["top_y"] = round(data["top_y"] * scale)
+            data["bottom_y"] = round(data["bottom_y"] * scale)
+            data["left_x"] = round(data["left_x"] * scale)
+            data["right_x"] = round(data["right_x"] * scale)
+
+        # Carry over metadata from original boundary — only coordinates change
+        return BoundaryResult(
+            top_y=data["top_y"],
+            bottom_y=data["bottom_y"],
+            left_x=data["left_x"],
+            right_x=data["right_x"],
+            confidence=data.get("confidence", boundary.confidence),
+            facility_type=boundary.facility_type,
+            building_count=boundary.building_count,
+            notes=boundary.notes,
+            reasoning=data.get("reasoning", ""),
+            self_check="",
+            raw_response=text,
+            prompt_text=prompt,
+            usage=usage,
+        )
+    except Exception as e:
+        logger.error("Boundary correction API error: %s", e)
         raise

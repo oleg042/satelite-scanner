@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_SETTINGS = {
     "openai_api_key": settings.openai_api_key,
     "serper_api_key": settings.serper_api_key,
-    "validation_model": "gpt-4o-mini",
-    "boundary_model": "gpt-4o",
+    "validation_model": "gpt-5-mini",
+    "boundary_model": "gpt-5.2",
     "default_zoom": str(settings.default_zoom),
     "default_buffer_m": str(settings.default_buffer_m),
     "overview_zoom": str(settings.overview_zoom),

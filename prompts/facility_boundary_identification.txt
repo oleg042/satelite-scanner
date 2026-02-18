@@ -63,7 +63,7 @@ Provide the facility boundary as pixel coordinates relative to the image:
 - left_x: leftmost pixel column
 - right_x: rightmost pixel column
 
-Add a 50-meter buffer around the identified operational footprint to ensure nothing is cut off at the edges.
+Draw the boundary as tightly as possible around the facility's operational footprint. Do NOT add extra buffer — a safety margin will be added automatically in post-processing.
 
 Also provide:
 - reasoning: brief explanation of how you identified the facility and drew the boundary (which buildings you included, where the property edges are, and why)
