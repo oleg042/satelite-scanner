@@ -16,14 +16,13 @@ import re
 import time
 from datetime import datetime, timezone
 
-import httpx
-
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import Scan, ScanMethod, ScanStatus, ScanStep, Screenshot, ScreenshotType, Setting
 from app.scanner.cache import TileCache
+from app.scanner.geocode import serper_maps_resolve
 from app.scanner.geo import (
     M_PER_DEG_LAT,
     bbox_add_buffer,
@@ -98,26 +97,16 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
 
 
 async def _re_geocode(db: AsyncSession, facility_name: str, address: str) -> tuple[float, float] | None:
-    """Try to re-geocode via Serper. Returns (lat, lng) or None on failure."""
+    """Try to re-geocode via Serper Maps. Returns (lat, lng) or None on failure."""
     key = await _get_setting(db, "serper_api_key")
     if not key:
         return None
-    q = " ".join(filter(None, [facility_name, address]))
-    if not q.strip():
+    if not facility_name and not address:
         return None
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "https://google.serper.dev/places",
-                headers={"X-API-KEY": key, "Content-Type": "application/json"},
-                json={"q": q},
-            )
-        if resp.status_code != 200:
-            logger.warning("Serper re-geocode failed with status %d", resp.status_code)
-            return None
-        places = resp.json().get("places", [])
-        if places and places[0].get("latitude") is not None:
-            return (places[0]["latitude"], places[0]["longitude"])
+        result = await serper_maps_resolve(key, facility_name, address)
+        if result:
+            return (result["lat"], result["lng"])
     except Exception as e:
         logger.warning("Serper re-geocode error: %s", e)
     return None

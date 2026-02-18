@@ -16,6 +16,7 @@ from app.models import Setting
 from app.schemas import HealthResponse, SettingsResponse, SettingsUpdate
 from app.config import settings as app_settings
 from app.scanner.vision import DEFAULT_VALIDATION_PROMPT, _load_default_boundary_prompt
+from app.scanner.geocode import serper_maps_resolve
 from app.worker import scan_queue
 
 from app.api.scans import router as scans_router
@@ -107,6 +108,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         overview_zoom=settings_dict.get("overview_zoom", ""),
         validation_prompt=settings_dict.get("validation_prompt", "") or DEFAULT_VALIDATION_PROMPT,
         boundary_prompt=settings_dict.get("boundary_prompt", "") or _load_default_boundary_prompt(),
+        verification_prompt=settings_dict.get("verification_prompt", ""),
     )
 
 
@@ -129,17 +131,6 @@ async def update_settings(req: SettingsUpdate, db: AsyncSession = Depends(get_db
 
 # --- Geocoder proxies (avoids CORS, sets proper User-Agent) ---
 
-@api_router.get("/geocode/nominatim")
-async def geocode_nominatim(address: str = Query(...)):
-    """Proxy to Nominatim to avoid CORS preflight and set User-Agent server-side."""
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": address, "format": "json", "limit": "3"}
-    headers = {"User-Agent": "SatelliteScanner/1.0"}
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, params=params, headers=headers)
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
-
-
 @api_router.get("/geocode/census")
 async def geocode_census(address: str = Query(...)):
     """Proxy to US Census Geocoder to avoid browser CORS restrictions."""
@@ -151,38 +142,20 @@ async def geocode_census(address: str = Query(...)):
 
 
 @api_router.get("/geocode/serper")
-async def geocode_serper(q: str = Query(...), db: AsyncSession = Depends(get_db)):
-    """Geocode via Serper Dev Places API — fast, accurate Google Places data."""
+async def geocode_serper(
+    name: str = Query(""),
+    address: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Geocode via Serper Maps API with retry + fuzzy address matching."""
     key = await _get_setting(db, "serper_api_key")
     if not key:
         return JSONResponse(content={"results": []})
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            "https://google.serper.dev/places",
-            headers={"X-API-KEY": key, "Content-Type": "application/json"},
-            json={"q": q},
-        )
-
-    if resp.status_code != 200:
-        logger.warning("Serper API error %d for query: %s", resp.status_code, q)
-        return JSONResponse(content={"results": [], "error": f"Serper {resp.status_code}"})
-
-    places = resp.json().get("places", [])
-    results = []
-    for p in places:
-        if p.get("latitude") is not None and p.get("longitude") is not None:
-            results.append({
-                "lat": p["latitude"],
-                "lng": p["longitude"],
-                "display_name": f"{p.get('title', '')} — {p.get('address', '')}".strip(" —"),
-                "source": "serper",
-                "address": p.get("address"),
-                "category": p.get("category"),
-                "phone": p.get("phoneNumber"),
-                "rating": p.get("rating"),
-            })
-    return JSONResponse(content={"results": results})
+    result = await serper_maps_resolve(key, name, address)
+    if result:
+        return JSONResponse(content={"results": [result]})
+    return JSONResponse(content={"results": [], "error": "Could not resolve address"})
 
 
 @api_router.get("/geocode/google-search")
