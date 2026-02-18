@@ -4,11 +4,13 @@ import logging
 import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 
 import httpx
 from PIL import Image
 
+from app.config import settings
 from app.scanner.cache import TileCache
 from app.scanner.geo import TILE_SIZE, lat_lng_to_tile, tile_to_lat_lng
 
@@ -29,25 +31,45 @@ HEADERS = {
 
 
 def download_tile(
-    x: int, y: int, zoom: int, cache: TileCache | None = None, delay: float = 0.05
+    x: int, y: int, zoom: int, cache: TileCache | None = None, delay: float = 0.05,
+    client: httpx.Client | None = None, max_retries: int = 2,
 ) -> bytes | None:
-    """Download a single satellite tile, using cache if available."""
+    """Download a single satellite tile, using cache if available.
+
+    If *client* is provided it will be used instead of creating a fresh one
+    per call (much better for concurrent workloads — shared connection pool).
+    Retries on 429/503 with exponential backoff.
+    """
     if cache is not None:
         cached = cache.get(x, y, zoom)
         if cached is not None:
             return cached
 
     url = f"https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={zoom}"
+    own_client = client is None
     try:
-        with httpx.Client(timeout=15, headers=HEADERS) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
-            data = resp.content
-        if cache is not None and data:
-            cache.put(x, y, zoom, data)
-        if delay > 0:
-            time.sleep(delay)
-        return data
+        c = httpx.Client(timeout=15, headers=HEADERS) if own_client else client
+        try:
+            for attempt in range(1 + max_retries):
+                resp = c.get(url)
+                if resp.status_code in (429, 503) and attempt < max_retries:
+                    wait = 2 ** attempt  # 1s, 2s
+                    logger.warning(
+                        "Tile (%d,%d) got %d, retry %d/%d in %ds",
+                        x, y, resp.status_code, attempt + 1, max_retries, wait,
+                    )
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                data = resp.content
+                if cache is not None and data:
+                    cache.put(x, y, zoom, data)
+                if delay > 0:
+                    time.sleep(delay)
+                return data
+        finally:
+            if own_client:
+                c.close()
     except Exception as e:
         logger.warning("Error downloading tile (%d,%d): %s", x, y, e)
         return None
@@ -103,12 +125,19 @@ def _stitch_chunked(
 def capture_area(
     min_lat: float, min_lng: float, max_lat: float, max_lng: float,
     zoom: int, cache: TileCache | None = None, delay: float = 0.05,
-    max_image_mb: int = 512,
+    max_image_mb: int = 512, max_workers: int | None = None,
 ) -> tuple[Image.Image | None, dict | None]:
     """Download and stitch tiles covering a bounding box.
 
+    Downloads tiles in parallel using a thread pool (*max_workers* defaults to
+    ``settings.tile_concurrency``).  The download phase is fully parallel; the
+    stitch phase runs sequentially afterwards to avoid PIL thread-safety issues.
+
     Returns (image, grid_info) or (None, None) on failure.
     """
+    if max_workers is None:
+        max_workers = settings.tile_concurrency
+
     tile_min_x, tile_max_y = lat_lng_to_tile(min_lat, min_lng, zoom)
     tile_max_x, tile_min_y = lat_lng_to_tile(max_lat, max_lng, zoom)
 
@@ -125,41 +154,44 @@ def capture_area(
 
     logger.info("Tile grid: %dx%d = %d tiles at zoom %d", num_x, num_y, total, zoom)
 
-    # Estimate memory: 3 bytes/pixel for RGB
-    stitched_mb = (full_w * full_h * 3) / (1024 * 1024)
-    use_chunked = stitched_mb > max_image_mb
+    # --- parallel download phase -------------------------------------------
+    tile_coords = [
+        (tx, ty)
+        for ty in range(tile_min_y, tile_max_y + 1)
+        for tx in range(tile_min_x, tile_max_x + 1)
+    ]
 
-    if use_chunked:
-        logger.info("Using chunked stitching (%.0f MB > %d MB limit)", stitched_mb, max_image_mb)
-        tiles_data: dict[str, bytes] = {}
-        stitched = None
-    else:
-        tiles_data = None
-        stitched = Image.new("RGB", (full_w, full_h))
+    tiles_data: dict[str, bytes] = {}
+    with httpx.Client(timeout=15, headers=HEADERS) as shared_client:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(
+                    download_tile, tx, ty, zoom,
+                    cache=cache, delay=delay, client=shared_client,
+                ): (tx, ty)
+                for tx, ty in tile_coords
+            }
+            for future in as_completed(futures):
+                tx, ty = futures[future]
+                try:
+                    data = future.result()
+                    if data:
+                        tiles_data[f"{tx},{ty}"] = data
+                except Exception as e:
+                    logger.warning("Tile (%d,%d) failed: %s", tx, ty, e)
 
-    downloaded = 0
-    for ty in range(tile_min_y, tile_max_y + 1):
-        for tx in range(tile_min_x, tile_max_x + 1):
-            col = tx - tile_min_x
-            row = ty - tile_min_y
-
-            tile_data = download_tile(tx, ty, zoom, cache=cache, delay=delay)
-            if tile_data:
-                if use_chunked:
-                    tiles_data[f"{tx},{ty}"] = tile_data
-                else:
-                    tile_img = Image.open(BytesIO(tile_data))
-                    stitched.paste(tile_img, (col * TILE_SIZE, row * TILE_SIZE))
-                    tile_img.close()
-                downloaded += 1
-
+    downloaded = len(tiles_data)
     logger.info("Downloaded %d/%d tiles", downloaded, total)
 
     if downloaded == 0:
         return None, None
 
-    # Chunked stitching if needed
+    # --- sequential stitch phase -------------------------------------------
+    stitched_mb = (full_w * full_h * 3) / (1024 * 1024)
+    use_chunked = stitched_mb > max_image_mb
+
     if use_chunked:
+        logger.info("Using chunked stitching (%.0f MB > %d MB limit)", stitched_mb, max_image_mb)
         temp_dir = tempfile.mkdtemp(prefix="sat_bands_")
         try:
             stitched = _stitch_chunked(
@@ -171,6 +203,18 @@ def capture_area(
             except OSError:
                 pass
         tiles_data.clear()
+    else:
+        stitched = Image.new("RGB", (full_w, full_h))
+        for ty in range(tile_min_y, tile_max_y + 1):
+            for tx in range(tile_min_x, tile_max_x + 1):
+                key = f"{tx},{ty}"
+                tile_bytes = tiles_data.get(key)
+                if tile_bytes:
+                    tile_img = Image.open(BytesIO(tile_bytes))
+                    col = tx - tile_min_x
+                    row = ty - tile_min_y
+                    stitched.paste(tile_img, (col * TILE_SIZE, row * TILE_SIZE))
+                    tile_img.close()
 
     grid_info = {
         "tile_min_x": tile_min_x, "tile_max_x": tile_max_x,

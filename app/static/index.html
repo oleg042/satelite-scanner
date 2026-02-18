@@ -16,6 +16,9 @@
   .nav-item:hover{background:#1f2937;color:#e5e7eb}
   .nav-item.active{background:#1d4ed8;color:#fff}
   .boundary-overlay{position:absolute;border:2px solid #ef4444;pointer-events:none;z-index:5;border-radius:2px}
+  #image-modal .boundary-overlay{border-width:3px}
+  #image-modal{transition:opacity .2s}
+  #image-modal.hidden{opacity:0;pointer-events:none}
 </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen flex">
@@ -222,6 +225,17 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ==================== IMAGE MODAL ==================== -->
+  <div id="image-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80" onclick="if(event.target===this)closeImageModal()">
+    <div class="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center">
+      <button onclick="closeImageModal()" class="absolute -top-3 -right-3 z-10 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-lg shadow-lg border border-gray-600">&times;</button>
+      <div id="image-modal-container" class="relative inline-block bbox-overlay-container">
+        <img id="image-modal-img" src="" alt="Screenshot" class="max-w-[88vw] max-h-[82vh] rounded-lg border border-gray-700 object-contain">
+      </div>
+      <div id="image-modal-caption" class="mt-2 text-sm text-gray-400 text-center"></div>
     </div>
   </div>
 
@@ -614,6 +628,45 @@ function esc(str) {
   return d.innerHTML;
 }
 
+// --- Image modal ---
+function openImageModal(url, label, overlayData) {
+  const modal = document.getElementById('image-modal');
+  const img = document.getElementById('image-modal-img');
+  const container = document.getElementById('image-modal-container');
+  const caption = document.getElementById('image-modal-caption');
+
+  // Clear previous overlay
+  container.querySelectorAll('.boundary-overlay').forEach(el => el.remove());
+
+  img.onload = null;
+  img.src = url;
+
+  // Caption with direct link
+  let captionHtml = `<span>${esc(label)}</span>`;
+  captionHtml += ` &mdash; <a href="${url}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">Open original in new tab ↗</a>`;
+  caption.innerHTML = captionHtml;
+
+  if (overlayData) {
+    img.onload = function() {
+      drawBoundaryOverlay(img, overlayData.bbox, overlayData.origW, overlayData.origH);
+    };
+  }
+
+  modal.classList.remove('hidden');
+  document.addEventListener('keydown', imageModalEscHandler);
+}
+
+function closeImageModal() {
+  const modal = document.getElementById('image-modal');
+  modal.classList.add('hidden');
+  document.getElementById('image-modal-img').src = '';
+  document.removeEventListener('keydown', imageModalEscHandler);
+}
+
+function imageModalEscHandler(e) {
+  if (e.key === 'Escape') closeImageModal();
+}
+
 // --- Boundary overlay ---
 function drawBoundaryOverlay(imgEl, pixelBbox, origWidth, origHeight) {
   const container = imgEl.closest('.bbox-overlay-container');
@@ -670,22 +723,21 @@ function renderDetail(scan) {
         }
       }
 
+      const label = `${ss.type} (z${ss.zoom || '?'})${sizeStr}`;
+      const overlayArg = overlayData ? JSON.stringify(overlayData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
+
       if (overlayData) {
         const bboxJson = JSON.stringify(overlayData.bbox).replace(/"/g, '&quot;');
         html += `<div class="text-center">
-          <div class="relative inline-block bbox-overlay-container">
-            <a href="${ss.url}" target="_blank" rel="noopener" title="Open full screenshot">
+          <div class="relative inline-block bbox-overlay-container cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', ${overlayArg})" title="Click to enlarge">
               <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
                 onload="drawBoundaryOverlay(this, ${bboxJson}, ${overlayData.origW}, ${overlayData.origH})">
-            </a>
           </div>
           <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr} <span class="text-red-400">■</span> AI boundary</div>
         </div>`;
       } else {
-        html += `<div class="text-center">
-          <a href="${ss.url}" target="_blank" rel="noopener" title="Open full screenshot">
+        html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null)" title="Click to enlarge">
             <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-          </a>
           <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
         </div>`;
       }
