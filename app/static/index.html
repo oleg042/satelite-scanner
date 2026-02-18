@@ -137,7 +137,15 @@
         class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
         &#8635; Refresh
       </button>
+      <button id="scan-pending-btn"
+        class="bg-green-700 hover:bg-green-600 text-white font-medium rounded px-3 py-1.5 text-sm transition">
+        Scan All Pending
+      </button>
       <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
+      <button id="scan-selected-btn" disabled
+        class="bg-green-700 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
+        Scan Selected (<span id="scan-selected-count">0</span>)
+      </button>
       <button id="delete-btn" disabled
         class="bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Delete Selected (<span id="delete-count">0</span>)
@@ -560,7 +568,7 @@ function renderTable() {
         else S.selected.delete(cb.dataset.id);
       }
       S.lastCheckedIdx = idx;
-      updateDeleteBtn();
+      updateSelectionBtns();
     });
   });
 
@@ -677,17 +685,25 @@ async function toggleRow(scanId) {
   renderTable();
 }
 
-// --- Selection / Delete ---
-function updateDeleteBtn() {
-  const btn = document.getElementById('delete-btn');
+// --- Selection / Delete / Scan ---
+function updateSelectionBtns() {
   const count = S.selected.size;
-  // Restore inner HTML if it was replaced (e.g. by 'Deleting...' text)
+
+  const delBtn = document.getElementById('delete-btn');
   if (!document.getElementById('delete-count')) {
-    btn.innerHTML = 'Delete Selected (<span id="delete-count">0</span>)';
+    delBtn.innerHTML = 'Delete Selected (<span id="delete-count">0</span>)';
   }
   document.getElementById('delete-count').textContent = count;
-  btn.disabled = count === 0;
-  btn.classList.toggle('hidden', count === 0);
+  delBtn.disabled = count === 0;
+  delBtn.classList.toggle('hidden', count === 0);
+
+  const scanBtn = document.getElementById('scan-selected-btn');
+  if (!document.getElementById('scan-selected-count')) {
+    scanBtn.innerHTML = 'Scan Selected (<span id="scan-selected-count">0</span>)';
+  }
+  document.getElementById('scan-selected-count').textContent = count;
+  scanBtn.disabled = count === 0;
+  scanBtn.classList.toggle('hidden', count === 0);
 }
 
 async function deleteSelected() {
@@ -702,13 +718,11 @@ async function deleteSelected() {
   try {
     const res = await api('DELETE', '/api/scans', { scan_ids: ids });
     toast(`Deleted ${res.deleted} scan${res.deleted !== 1 ? 's' : ''}`);
-    // Immediately remove deleted rows from local state for instant UI feedback
     const deleted = new Set(ids);
     S.scans = S.scans.filter(s => !deleted.has(s.id));
     S.selected.clear();
-    updateDeleteBtn();
+    updateSelectionBtns();
     renderTable();
-    // Background refresh for accurate server state
     fetchScans();
     fetchHealth();
   } catch (e) {
@@ -716,7 +730,53 @@ async function deleteSelected() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = 'Delete Selected (<span id="delete-count">0</span>)';
-    updateDeleteBtn();
+    updateSelectionBtns();
+  }
+}
+
+async function scanSelected() {
+  const ids = [...S.selected];
+  if (ids.length === 0) return;
+
+  const btn = document.getElementById('scan-selected-btn');
+  btn.disabled = true;
+  btn.textContent = 'Enqueuing...';
+
+  try {
+    const res = await api('POST', '/api/scans/enqueue', { scan_ids: ids });
+    let msg = `Queued ${res.queued} scan${res.queued !== 1 ? 's' : ''}`;
+    if (res.skipped_no_coords > 0) msg += ` (${res.skipped_no_coords} skipped — no coords)`;
+    toast(msg);
+    S.selected.clear();
+    updateSelectionBtns();
+    fetchScans();
+    fetchHealth();
+  } catch (e) {
+    toast('Enqueue failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Scan Selected (<span id="scan-selected-count">0</span>)';
+    updateSelectionBtns();
+  }
+}
+
+async function scanAllPending() {
+  const btn = document.getElementById('scan-pending-btn');
+  btn.disabled = true;
+  btn.textContent = 'Enqueuing...';
+
+  try {
+    const res = await api('POST', '/api/scans/enqueue-pending');
+    let msg = `Queued ${res.queued} pending scan${res.queued !== 1 ? 's' : ''}`;
+    if (res.skipped_no_coords > 0) msg += ` (${res.skipped_no_coords} skipped — no coords)`;
+    toast(msg);
+    fetchScans();
+    fetchHealth();
+  } catch (e) {
+    toast('Enqueue failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Scan All Pending';
   }
 }
 
@@ -1199,12 +1259,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (checked) S.selected.add(s.id);
       else S.selected.delete(s.id);
     });
-    updateDeleteBtn();
+    updateSelectionBtns();
     renderTable();
   });
 
   // Delete button
   document.getElementById('delete-btn').addEventListener('click', deleteSelected);
+  document.getElementById('scan-selected-btn').addEventListener('click', scanSelected);
+  document.getElementById('scan-pending-btn').addEventListener('click', scanAllPending);
 
   // Refresh
   document.getElementById('refresh-btn').addEventListener('click', fetchScans);

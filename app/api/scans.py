@@ -198,6 +198,66 @@ async def delete_scans(
     return {"deleted": result.rowcount}
 
 
+@router.post("/scans/enqueue", status_code=200)
+async def enqueue_scans(
+    scan_ids: list[UUID] = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue specific scans for processing."""
+    if not scan_ids:
+        raise HTTPException(status_code=400, detail="No scan IDs provided")
+    if len(scan_ids) > 200:
+        raise HTTPException(status_code=400, detail="Max 200 scans per enqueue")
+
+    result = await db.execute(select(Scan).where(Scan.id.in_(scan_ids)))
+    scans = result.scalars().all()
+
+    queued = 0
+    skipped = 0
+    for scan in scans:
+        if scan.lat is None or scan.lng is None:
+            skipped += 1
+            continue
+        scan.status = ScanStatus.queued
+        scan.error_message = None
+        queued += 1
+
+    await db.commit()
+
+    for scan in scans:
+        if scan.lat is not None and scan.lng is not None:
+            await enqueue_scan(scan.id)
+
+    return {"queued": queued, "skipped_no_coords": skipped}
+
+
+@router.post("/scans/enqueue-pending", status_code=200)
+async def enqueue_all_pending(db: AsyncSession = Depends(get_db)):
+    """Enqueue all pending scans that have coordinates."""
+    result = await db.execute(
+        select(Scan).where(Scan.status == ScanStatus.pending)
+    )
+    scans = result.scalars().all()
+
+    queued = 0
+    skipped = 0
+    for scan in scans:
+        if scan.lat is None or scan.lng is None:
+            skipped += 1
+            continue
+        scan.status = ScanStatus.queued
+        scan.error_message = None
+        queued += 1
+
+    await db.commit()
+
+    for scan in scans:
+        if scan.lat is not None and scan.lng is not None and scan.status == ScanStatus.queued:
+            await enqueue_scan(scan.id)
+
+    return {"queued": queued, "skipped_no_coords": skipped}
+
+
 def _parse_json_field(text: str | None) -> dict | None:
     """Safely parse a JSON string field, return dict or None."""
     if not text:
