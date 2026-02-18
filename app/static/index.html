@@ -111,23 +111,14 @@
     <div class="px-6 py-3 flex flex-wrap items-center gap-3 border-b border-gray-800/50">
       <input id="search-input" type="text" placeholder="Search name or address..."
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
-      <div class="flex rounded-lg overflow-hidden border border-gray-700">
-        <button data-pill="all" class="pill-btn px-3 py-1.5 text-sm font-medium bg-blue-600 text-white transition">All</button>
-        <button data-pill="unprocessed" class="pill-btn px-3 py-1.5 text-sm font-medium bg-gray-800 text-gray-400 hover:text-gray-200 transition">Unprocessed</button>
-        <button data-pill="processed" class="pill-btn px-3 py-1.5 text-sm font-medium bg-gray-800 text-gray-400 hover:text-gray-200 transition">Processed</button>
-      </div>
       <select id="filter-status"
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
         <option value="">All Statuses</option>
         <option value="pending">Pending</option>
         <option value="queued">Queued</option>
-        <option value="running_osm">Running OSM</option>
-        <option value="running_validate">Running Validate</option>
-        <option value="running_vision">Running Vision</option>
-        <option value="running_tiling">Running Tiling</option>
-        <option value="completed">Completed</option>
         <option value="failed">Failed</option>
         <option value="skipped">Skipped</option>
+        <option value="completed">Completed</option>
       </select>
       <select id="filter-method"
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
@@ -346,7 +337,6 @@ const S = {
   lastCheckedIdx: null,
   pollTimer: null,
   currentPage: 'scans',
-  activePill: 'all',
   // Geocoding resolved state
   resolved: null, // { lat, lng, display_name, source }
 };
@@ -736,16 +726,8 @@ async function fetchScans() {
   const method = document.getElementById('filter-method').value;
   const search = document.getElementById('search-input').value.trim();
 
-  // Pill filter takes precedence
-  if (S.activePill === 'unprocessed') {
-    params.set('status', 'pending');
-  } else if (S.activePill === 'processed') {
-    params.set('exclude_status', 'pending');
-  } else {
-    // "All" pill — use dropdown if set
-    const status = document.getElementById('filter-status').value;
-    if (status) params.set('status', status);
-  }
+  const status = document.getElementById('filter-status').value;
+  if (status) params.set('status', status);
   if (method) params.set('method', method);
   if (search) params.set('search', search);
   params.set('limit', S.limit);
@@ -1124,21 +1106,6 @@ async function submitScan(e) {
   }
 }
 
-// --- Pill filters ---
-function setActivePill(pill) {
-  S.activePill = pill;
-  S.offset = 0;
-  document.querySelectorAll('.pill-btn').forEach(btn => {
-    const active = btn.dataset.pill === pill;
-    btn.className = `pill-btn px-3 py-1.5 text-sm font-medium transition ${active ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`;
-  });
-  // Disable status dropdown when a non-"All" pill is active
-  const statusDD = document.getElementById('filter-status');
-  statusDD.disabled = pill !== 'all';
-  if (pill !== 'all') statusDD.value = '';
-  fetchScans();
-}
-
 // --- Import modal ---
 function openImportModal() {
   document.getElementById('import-modal').classList.remove('hidden');
@@ -1220,11 +1187,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
   document.getElementById('filter-method').addEventListener('change', () => { S.offset = 0; fetchScans(); });
-
-  // Pill filter clicks
-  document.querySelectorAll('.pill-btn').forEach(btn => {
-    btn.addEventListener('click', () => setActivePill(btn.dataset.pill));
-  });
 
   // Import modal
   document.getElementById('import-btn').addEventListener('click', openImportModal);
