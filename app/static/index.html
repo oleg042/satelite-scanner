@@ -279,6 +279,10 @@
                   <option value="gpt-4.1">GPT-4.1 (1M context)</option>
                   <option value="gpt-4o">GPT-4o</option>
                 </optgroup>
+                <optgroup label="Reasoning">
+                  <option value="o3">o3 (Visual reasoning)</option>
+                  <option value="o3-pro">o3 Pro (Most reliable)</option>
+                </optgroup>
                 <optgroup label="Efficient">
                   <option value="gpt-5-mini">GPT-5 Mini</option>
                   <option value="gpt-4.1-mini">GPT-4.1 Mini (1M context)</option>
@@ -299,6 +303,10 @@
                   <option value="gpt-5">GPT-5</option>
                   <option value="gpt-4.1">GPT-4.1 (1M context)</option>
                   <option value="gpt-4o">GPT-4o</option>
+                </optgroup>
+                <optgroup label="Reasoning">
+                  <option value="o3">o3 (Visual reasoning)</option>
+                  <option value="o3-pro">o3 Pro (Most reliable)</option>
                 </optgroup>
                 <optgroup label="Efficient">
                   <option value="gpt-5-mini">GPT-5 Mini</option>
@@ -1103,9 +1111,11 @@ function parseRawCoords(str) {
 // --- Geocoder helpers (each returns [] on failure, never throws) ---
 
 function fetchSerper(facilityName, address) {
-  const q = [facilityName, address].filter(Boolean).join(' ');
-  if (!q) return Promise.resolve([]);
-  return fetch(`/api/geocode/serper?q=${encodeURIComponent(q)}`)
+  if (!facilityName && !address) return Promise.resolve([]);
+  const params = new URLSearchParams();
+  if (facilityName) params.set('name', facilityName);
+  if (address) params.set('address', address);
+  return fetch(`/api/geocode/serper?${params}`)
     .then(r => r.ok ? r.json() : { results: [] })
     .then(data => (data.results || []).map(r => ({
       lat: r.lat, lng: r.lng, display_name: r.display_name, source: 'serper',
@@ -1143,46 +1153,30 @@ function fetchCensus(address) {
     .catch(() => []);
 }
 
-function fetchNominatim(address) {
-  return fetch(`/api/geocode/nominatim?address=${encodeURIComponent(address)}`)
-    .then(r => r.ok ? r.json() : [])
-    .then(data => (data || []).map(r => ({
-      lat: parseFloat(r.lat), lng: parseFloat(r.lon), display_name: r.display_name, source: 'nominatim',
-    })))
-    .catch(() => []);
-}
-
 async function geocodeAddress(str, facilityName = '') {
-  // Step 1: Try Serper first (fastest, most accurate)
+  // Step 1: Try Serper Maps (retry + fuzzy match built in)
   const serper = await fetchSerper(facilityName, str);
   if (serper.length > 0) {
-    // Fire others in background for alternatives, but return Serper as primary
-    const othersP = Promise.all([fetchCensus(str), fetchNominatim(str)]);
-    const [census, nominatim] = await Promise.race([
-      othersP,
-      new Promise(resolve => setTimeout(() => resolve([[], []]), 3000)),
+    const census = await Promise.race([
+      fetchCensus(str),
+      new Promise(resolve => setTimeout(() => resolve([]), 3000)),
     ]);
-    const alts = [...census, ...nominatim];
-    return [...serper, ...alts];
+    return [...serper, ...census];
   }
 
-  // Step 2: Serper failed/empty — fall back to existing parallel strategy
+  // Step 2: Census fallback
   const googleP = facilityName ? fetchGoogle(facilityName, str) : Promise.resolve([]);
-  const censusP = fetchCensus(str);
-  const nominatimP = fetchNominatim(str);
-
-  const [census, nominatim] = await Promise.all([censusP, nominatimP]);
-  const fallback = census.length > 0 ? census : (nominatim.length > 0 ? nominatim : []);
-
-  if (fallback.length > 0) {
+  const census = await fetchCensus(str);
+  if (census.length > 0) {
     const google = await Promise.race([
       googleP,
       new Promise(resolve => setTimeout(() => resolve([]), 8000)),
     ]);
     if (google.length > 0) return google;
-    return fallback;
+    return census;
   }
 
+  // Step 3: Google Maps headless fallback
   const google = await googleP;
   if (google.length > 0) return google;
   throw new Error('No results found for this address');
@@ -1204,7 +1198,7 @@ async function resolveLocation(input) {
   const rawCoords = parseRawCoords(trimmed);
   if (rawCoords) return { ...rawCoords, display_name: `Raw coordinates`, source: 'raw_coords' };
 
-  // 3. Address geocoding (Google Maps → Census → Nominatim)
+  // 3. Address geocoding (Serper → Census → Google)
   const facilityName = document.getElementById('sf-name')?.value?.trim() || '';
   const results = await geocodeAddress(trimmed, facilityName);
   return { ...results[0], alternatives: results.slice(1) };
@@ -1215,7 +1209,6 @@ function _sourceBadge(source) {
     serper:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-700/60 text-emerald-200">Serper</span>',
     google:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-700/60 text-green-200">Google</span>',
     census:      '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-700/60 text-blue-200">Census</span>',
-    nominatim:   '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-700/60 text-amber-200">Nominatim</span>',
     google_maps: '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-600/60 text-gray-300">URL</span>',
     raw_coords:  '<span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-600/60 text-gray-300">Manual</span>',
   };
