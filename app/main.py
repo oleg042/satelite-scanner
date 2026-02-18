@@ -35,6 +35,7 @@ DEFAULT_SETTINGS = {
     "overview_zoom": str(settings.overview_zoom),
     "validation_prompt": "",
     "boundary_prompt": "",
+    "verification_prompt": "",
 }
 
 

@@ -198,7 +198,7 @@ def validate_osm_bbox(
         )
     except Exception as e:
         logger.error("Validation API error: %s", e)
-        return None
+        raise
 
 
 def detect_facility_boundary(
@@ -295,7 +295,7 @@ def detect_facility_boundary(
         )
     except Exception as e:
         logger.error("Boundary detection API error: %s", e)
-        return None
+        raise
 
 
 DEFAULT_VERIFICATION_PROMPT = """You are verifying an AI-detected facility boundary on a satellite image.
@@ -331,6 +331,7 @@ def verify_facility_boundary(
     boundary: BoundaryResult,
     api_key: str,
     model: str = "gpt-4o-mini",
+    prompt_template: str = "",
 ) -> Optional[VerificationResult]:
     """Draw detected bbox on overview image and ask a second model to verify it.
 
@@ -358,7 +359,9 @@ def verify_facility_boundary(
         img.close()
         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-        prompt = DEFAULT_VERIFICATION_PROMPT.format(name=name)
+        if not prompt_template:
+            prompt_template = DEFAULT_VERIFICATION_PROMPT
+        prompt = prompt_template.format(name=name)
 
         logger.info("Calling %s for boundary verification...", model)
         client = OpenAI(api_key=api_key)
@@ -397,4 +400,4 @@ def verify_facility_boundary(
         )
     except Exception as e:
         logger.error("Verification API error: %s", e)
-        return None
+        raise

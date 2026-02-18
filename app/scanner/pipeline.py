@@ -60,6 +60,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     overview_zoom = int(await _get_setting(db, "overview_zoom", str(settings.overview_zoom)))
     validation_prompt = await _get_setting(db, "validation_prompt", "")
     boundary_prompt = await _get_setting(db, "boundary_prompt", "")
+    verification_prompt = await _get_setting(db, "verification_prompt", "")
 
     return {
         "api_key": api_key,
@@ -70,6 +71,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "overview_zoom": overview_zoom,
         "validation_prompt": validation_prompt,
         "boundary_prompt": boundary_prompt,
+        "verification_prompt": verification_prompt,
     }
 
 
@@ -277,12 +279,18 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
                 width_m, height_m = bbox_dimensions_m(*osm_bbox)
 
-                validation = await asyncio.to_thread(
-                    validate_osm_bbox,
-                    abs_path, facility_name, lat, lng, width_m, height_m,
-                    config["api_key"], config["validation_model"],
-                    config["validation_prompt"],
-                )
+                validation = None
+                validation_error = None
+                try:
+                    validation = await asyncio.to_thread(
+                        validate_osm_bbox,
+                        abs_path, facility_name, lat, lng, width_m, height_m,
+                        config["api_key"], config["validation_model"],
+                        config["validation_prompt"],
+                    )
+                except Exception as e:
+                    validation_error = str(e)
+                    logger.warning("Validation call failed: %s", e)
 
                 ai_elapsed = int((time.monotonic() - ai_start) * 1000)
                 val_decision = None
@@ -301,7 +309,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         method = None
                 else:
                     final_bbox = osm_bbox
-                    val_decision = "AI call failed (returned None). Using OSM bbox as fallback."
+                    val_decision = f"AI validation failed: {validation_error or 'unknown error'}. Using OSM bbox as fallback."
                     logger.warning("Validation call failed, using OSM bbox anyway")
 
                 await _record_step(
@@ -321,8 +329,9 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     output_summary=json.dumps({
                         "approved": validation.approved if validation else None,
                         "facility_type": validation.facility_type if validation else None,
-                        "reason": validation.reason if validation else "call_failed",
+                        "reason": validation.reason if validation else None,
                         "notes": validation.notes if validation else None,
+                        "error": validation_error,
                     }),
                     decision=val_decision,
                     ai_model=config["validation_model"],
@@ -378,15 +387,23 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
                 width_m, height_m = bbox_dimensions_m(*wide_bbox)
 
-                boundary = await asyncio.to_thread(
-                    detect_facility_boundary,
-                    abs_path, facility_name, lat, lng, width_m, height_m,
-                    config["api_key"], config["boundary_model"],
-                    config["boundary_prompt"],
-                )
+                boundary = None
+                boundary_error = None
+                try:
+                    boundary = await asyncio.to_thread(
+                        detect_facility_boundary,
+                        abs_path, facility_name, lat, lng, width_m, height_m,
+                        config["api_key"], config["boundary_model"],
+                        config["boundary_prompt"],
+                    )
+                except Exception as e:
+                    boundary_error = str(e)
+                    logger.warning("Boundary detection failed: %s", e)
 
                 vision_decision = None
                 verification = None
+                verification_error = None
+                original_boundary = None
 
                 if boundary:
                     scan.ai_confidence = boundary.confidence
@@ -448,14 +465,36 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         return
 
                     # Verify boundary with a second AI call
-                    verification = await asyncio.to_thread(
-                        verify_facility_boundary,
-                        abs_path, facility_name, boundary,
-                        config["api_key"], config["validation_model"],
-                    )
+                    try:
+                        verification = await asyncio.to_thread(
+                            verify_facility_boundary,
+                            abs_path, facility_name, boundary,
+                            config["api_key"], config["validation_model"],
+                            config["verification_prompt"],
+                        )
+                    except Exception as e:
+                        verification_error = str(e)
+                        logger.warning("Verification call failed: %s", e)
 
                     if verification and not verification.approved:
                         logger.info("Boundary rejected: %s. Retrying with feedback...", verification.reason)
+
+                        # Preserve original detection before retry overwrites it
+                        original_boundary = {
+                            "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
+                                           "left_x": boundary.left_x, "right_x": boundary.right_x},
+                            "confidence": boundary.confidence,
+                            "facility_type": boundary.facility_type,
+                            "building_count": boundary.building_count,
+                            "notes": boundary.notes,
+                            "raw_response": boundary.raw_response,
+                            "prompt_text": boundary.prompt_text,
+                            "tokens": {
+                                "prompt": boundary.usage.prompt_tokens,
+                                "completion": boundary.usage.completion_tokens,
+                                "total": boundary.usage.total_tokens,
+                            } if boundary.usage else None,
+                        }
 
                         # Retry boundary detection with rejection feedback
                         retry_extra = (
@@ -465,12 +504,16 @@ async def run_pipeline(scan_id, db: AsyncSession):
                             f"Please correct these issues in your new boundary detection."
                         )
                         retry_prompt = (config["boundary_prompt"] or "") + retry_extra
-                        boundary = await asyncio.to_thread(
-                            detect_facility_boundary,
-                            abs_path, facility_name, lat, lng, width_m, height_m,
-                            config["api_key"], config["boundary_model"],
-                            retry_prompt,
-                        )
+                        try:
+                            boundary = await asyncio.to_thread(
+                                detect_facility_boundary,
+                                abs_path, facility_name, lat, lng, width_m, height_m,
+                                config["api_key"], config["boundary_model"],
+                                retry_prompt,
+                            )
+                        except Exception as e:
+                            boundary = None
+                            logger.warning("Boundary retry failed: %s", e)
 
                         if boundary:
                             scan.ai_confidence = boundary.confidence
@@ -490,12 +533,13 @@ async def run_pipeline(scan_id, db: AsyncSession):
                             f"AI detected facility boundary ({verified_str}) — confidence: {boundary.confidence}, "
                             f"type: {boundary.facility_type}, {boundary.building_count} buildings. "
                             f"Pixel bbox: ({boundary.left_x},{boundary.top_y})-({boundary.right_x},{boundary.bottom_y}) "
-                            f"→ geo bbox: {[round(x, 6) for x in final_bbox]}"
+                            f"→ raw geo: {[round(x, 6) for x in raw_bbox]} "
+                            f"→ buffered: {[round(x, 6) for x in final_bbox]}"
                         )
                     else:
-                        vision_decision = "AI boundary detection failed. Will fall back to radius."
+                        vision_decision = f"AI boundary detection failed after retry. Will fall back to radius."
                 else:
-                    vision_decision = "AI boundary detection failed (returned None). Will fall back to radius."
+                    vision_decision = f"AI boundary detection failed: {boundary_error or 'unknown error'}. Will fall back to radius."
 
                 ai_elapsed = int((time.monotonic() - ai_start) * 1000)
 
@@ -516,12 +560,25 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         "facility_type": boundary.facility_type if boundary else None,
                         "building_count": boundary.building_count if boundary else None,
                         "notes": boundary.notes if boundary else None,
+                        "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
+                                       "left_x": boundary.left_x, "right_x": boundary.right_x} if boundary else None,
+                        "raw_geo_bbox": list(raw_bbox) if final_bbox and method == ScanMethod.ai_vision else None,
                         "detected_bbox": list(final_bbox) if final_bbox and method == ScanMethod.ai_vision else None,
+                        "boundary_error": boundary_error,
                         "verification": {
+                            "model": config["validation_model"],
                             "approved": verification.approved,
                             "reason": verification.reason,
                             "issues": verification.issues,
-                        } if verification else None,
+                            "prompt": verification.prompt_text,
+                            "raw_response": verification.raw_response,
+                            "tokens": {
+                                "prompt": verification.usage.prompt_tokens,
+                                "completion": verification.usage.completion_tokens,
+                                "total": verification.usage.total_tokens,
+                            } if verification.usage else None,
+                        } if verification else {"error": verification_error} if verification_error else None,
+                        "original_detection": original_boundary,
                     }),
                     decision=vision_decision,
                     ai_model=config["boundary_model"],

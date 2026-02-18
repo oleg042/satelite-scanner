@@ -15,6 +15,7 @@
   .nav-item{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:.375rem;font-size:.875rem;transition:all .15s;cursor:pointer;color:#9ca3af}
   .nav-item:hover{background:#1f2937;color:#e5e7eb}
   .nav-item.active{background:#1d4ed8;color:#fff}
+  .boundary-overlay{position:absolute;border:2px solid #ef4444;pointer-events:none;z-index:5;border-radius:2px}
 </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen flex">
@@ -315,6 +316,16 @@
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
             <p class="text-xs text-gray-600 mt-1">Sent with the satellite image for facility boundary identification (step 3). Image context is appended automatically.</p>
           </div>
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-sm text-gray-300">Verification Prompt</label>
+              <button type="button" onclick="resetPrompt('verification')"
+                class="text-xs text-gray-500 hover:text-gray-300 transition">Reset to default</button>
+            </div>
+            <textarea id="set-verification-prompt" rows="6"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
+            <p class="text-xs text-gray-600 mt-1">Sent with the annotated image (red rectangle) to verify AI-detected boundaries (step 3). Supports {name} placeholder.</p>
+          </div>
         </div>
 
         <!-- Save -->
@@ -593,6 +604,35 @@ function esc(str) {
   return d.innerHTML;
 }
 
+// --- Boundary overlay ---
+function drawBoundaryOverlay(imgEl, pixelBbox, origWidth, origHeight) {
+  const container = imgEl.closest('.bbox-overlay-container');
+  if (!container) return;
+  // Remove any existing overlays
+  container.querySelectorAll('.boundary-overlay').forEach(el => el.remove());
+
+  const renderedW = imgEl.clientWidth;
+  const renderedH = imgEl.clientHeight;
+  if (!renderedW || !renderedH) return;
+
+  const scaleX = renderedW / origWidth;
+  const scaleY = renderedH / origHeight;
+
+  const left = pixelBbox.left_x * scaleX;
+  const top = pixelBbox.top_y * scaleY;
+  const width = (pixelBbox.right_x - pixelBbox.left_x) * scaleX;
+  const height = (pixelBbox.bottom_y - pixelBbox.top_y) * scaleY;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'boundary-overlay';
+  overlay.style.left = left + 'px';
+  overlay.style.top = top + 'px';
+  overlay.style.width = width + 'px';
+  overlay.style.height = height + 'px';
+  overlay.title = `AI boundary: ${pixelBbox.left_x},${pixelBbox.top_y} → ${pixelBbox.right_x},${pixelBbox.bottom_y}`;
+  container.appendChild(overlay);
+}
+
 // --- Detail panel ---
 function renderDetail(scan) {
   const trace = S.expanded[scan.id];
@@ -605,12 +645,40 @@ function renderDetail(scan) {
       if (ss.width && ss.height) sizeParts.push(`${ss.width}×${ss.height}px`);
       if (ss.file_size_bytes) sizeParts.push(`${(ss.file_size_bytes / 1048576).toFixed(2)} MB`);
       const sizeStr = sizeParts.length ? ` — ${sizeParts.join(', ')}` : '';
-      html += `<div class="text-center">
-        <a href="${ss.url}" target="_blank" rel="noopener" title="Open full screenshot">
-          <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-        </a>
-        <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
-      </div>`;
+
+      // Check for AI boundary overlay on ai_overview screenshots
+      let overlayData = null;
+      if (ss.type === 'ai_overview' && trace && trace.steps) {
+        const visionStep = trace.steps.find(s => s.step_name === 'ai_vision');
+        if (visionStep && visionStep.output_summary && visionStep.output_summary.pixel_bbox) {
+          const pb = visionStep.output_summary.pixel_bbox;
+          const dimStr = visionStep.input_summary && visionStep.input_summary.overview_image;
+          const dimMatch = dimStr ? dimStr.match(/(\d+)x(\d+)/) : null;
+          if (dimMatch) {
+            overlayData = { bbox: pb, origW: parseInt(dimMatch[1]), origH: parseInt(dimMatch[2]) };
+          }
+        }
+      }
+
+      if (overlayData) {
+        const bboxJson = JSON.stringify(overlayData.bbox).replace(/"/g, '&quot;');
+        html += `<div class="text-center">
+          <div class="relative inline-block bbox-overlay-container">
+            <a href="${ss.url}" target="_blank" rel="noopener" title="Open full screenshot">
+              <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
+                onload="drawBoundaryOverlay(this, ${bboxJson}, ${overlayData.origW}, ${overlayData.origH})">
+            </a>
+          </div>
+          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr} <span class="text-red-400">■</span> AI boundary</div>
+        </div>`;
+      } else {
+        html += `<div class="text-center">
+          <a href="${ss.url}" target="_blank" rel="noopener" title="Open full screenshot">
+            <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
+          </a>
+          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
+        </div>`;
+      }
     });
     html += '</div>';
   }
@@ -838,11 +906,12 @@ async function loadSettings() {
     document.getElementById('set-overview-zoom').value = s.overview_zoom || '';
     document.getElementById('set-validation-prompt').value = s.validation_prompt || '';
     document.getElementById('set-boundary-prompt').value = s.boundary_prompt || '';
+    document.getElementById('set-verification-prompt').value = s.verification_prompt || '';
   } catch {}
 }
 
 async function resetPrompt(type) {
-  const key = type === 'validation' ? 'validation_prompt' : 'boundary_prompt';
+  const key = type + '_prompt';
   try {
     await api('PUT', '/api/settings', { [key]: '' });
     toast('Prompt reset to default');
@@ -873,6 +942,8 @@ async function saveSettings(e) {
   if (vp) body.validation_prompt = vp;
   const bp = document.getElementById('set-boundary-prompt').value.trim();
   if (bp) body.boundary_prompt = bp;
+  const vfp = document.getElementById('set-verification-prompt').value.trim();
+  if (vfp) body.verification_prompt = vfp;
 
   if (Object.keys(body).length === 0) {
     toast('No changes to save', 'error');
