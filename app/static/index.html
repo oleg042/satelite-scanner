@@ -80,7 +80,7 @@
                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
             </div>
             <button id="sf-resolve" type="button"
-              class="bg-gray-700 hover:bg-gray-600 text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
+              class="bg-gray-700 hover:bg-gray-600 active:scale-95 text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
               Resolve
             </button>
           </div>
@@ -100,11 +100,11 @@
               <input id="sf-lng" type="number" step="any" placeholder="-80.6753"
                 class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-32 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
             </div>
-            <button type="button" onclick="applyManualCoords()" class="bg-gray-700 hover:bg-gray-600 text-white font-medium rounded px-3 py-1.5 text-sm transition">Apply</button>
-            <button type="button" onclick="cancelManualOverride()" class="text-gray-500 hover:text-gray-300 text-sm transition">Cancel</button>
+            <button type="button" onclick="applyManualCoords()" class="bg-gray-700 hover:bg-gray-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">Apply</button>
+            <button type="button" onclick="cancelManualOverride()" class="text-gray-500 hover:text-gray-300 active:scale-95 text-sm transition">Cancel</button>
           </div>
           <button id="sf-submit" type="submit" disabled
-            class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
+            class="bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
             Submit Scan
           </button>
         </form>
@@ -134,24 +134,24 @@
         <option value="skipped">Skipped</option>
       </select>
       <button id="import-btn" title="Bulk import facilities"
-        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
         Import
       </button>
       <button id="refresh-btn" title="Refresh"
-        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 rounded px-3 py-1.5 text-sm transition">
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
         &#8635; Refresh
       </button>
       <button id="scan-pending-btn"
-        class="bg-green-700 hover:bg-green-600 text-white font-medium rounded px-3 py-1.5 text-sm transition">
+        class="bg-green-700 hover:bg-green-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">
         Scan All Pending
       </button>
       <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
       <button id="scan-selected-btn" disabled
-        class="bg-green-700 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
+        class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Scan Selected (<span id="scan-selected-count">0</span>)
       </button>
       <button id="delete-btn" disabled
-        class="bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
+        class="bg-red-700 hover:bg-red-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Delete Selected (<span id="delete-count">0</span>)
       </button>
     </div>
@@ -194,12 +194,12 @@
     <!-- Pagination -->
     <div class="px-6 py-3 border-t border-gray-800 flex items-center justify-between shrink-0">
       <button id="prev-btn" disabled
-        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
         &larr; Prev
       </button>
       <span id="page-info" class="text-sm text-gray-500"></span>
       <button id="next-btn" disabled
-        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
+        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded px-4 py-1.5 text-sm transition">
         Next &rarr;
       </button>
     </div>
@@ -210,7 +210,7 @@
     <div class="bg-gray-900 border border-gray-700 rounded-lg shadow-xl w-full max-w-lg mx-4">
       <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
         <h3 class="font-semibold">Bulk Import Facilities</h3>
-        <button onclick="closeImportModal()" class="text-gray-500 hover:text-gray-300 text-lg">&times;</button>
+        <button onclick="closeImportModal()" class="text-gray-500 hover:text-gray-300 active:scale-95 text-lg">&times;</button>
       </div>
       <div class="px-5 py-4 space-y-3">
         <p class="text-sm text-gray-400">Paste tab-separated rows: <code class="text-xs bg-gray-800 px-1 rounded">Company Name&#9;Address</code></p>
@@ -219,9 +219,9 @@
         <div class="flex items-center justify-between">
           <span id="import-count" class="text-sm text-gray-500">0 entries</span>
           <div class="flex gap-2">
-            <button onclick="closeImportModal()" class="bg-gray-700 hover:bg-gray-600 text-white font-medium rounded px-4 py-1.5 text-sm transition">Cancel</button>
+            <button onclick="closeImportModal()" class="bg-gray-700 hover:bg-gray-600 active:scale-95 text-white font-medium rounded px-4 py-1.5 text-sm transition">Cancel</button>
             <button id="import-submit-btn" onclick="submitImport()" disabled
-              class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition">Import</button>
+              class="bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition">Import</button>
           </div>
         </div>
       </div>
@@ -231,7 +231,7 @@
   <!-- ==================== IMAGE MODAL ==================== -->
   <div id="image-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80" onclick="if(event.target===this)closeImageModal()">
     <div class="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center">
-      <button onclick="closeImageModal()" class="absolute -top-3 -right-3 z-10 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-lg shadow-lg border border-gray-600">&times;</button>
+      <button onclick="closeImageModal()" class="absolute -top-3 -right-3 z-10 bg-gray-800 hover:bg-gray-700 active:scale-95 text-gray-300 hover:text-white rounded-full w-8 h-8 flex items-center justify-center text-lg shadow-lg border border-gray-600">&times;</button>
       <div id="image-modal-container" class="relative inline-block bbox-overlay-container">
         <img id="image-modal-img" src="" alt="Screenshot" class="max-w-[88vw] max-h-[82vh] rounded-lg border border-gray-700 object-contain">
       </div>
@@ -352,7 +352,7 @@
             <div class="flex items-center justify-between mb-1.5">
               <label class="text-sm text-gray-300">Validation Prompt</label>
               <button type="button" onclick="resetPrompt('validation')"
-                class="text-xs text-gray-500 hover:text-gray-300 transition">Reset to default</button>
+                class="text-xs text-gray-500 hover:text-gray-300 active:scale-95 transition">Reset to default</button>
             </div>
             <textarea id="set-validation-prompt" rows="6"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
@@ -362,7 +362,7 @@
             <div class="flex items-center justify-between mb-1.5">
               <label class="text-sm text-gray-300">Boundary Detection Prompt</label>
               <button type="button" onclick="resetPrompt('boundary')"
-                class="text-xs text-gray-500 hover:text-gray-300 transition">Reset to default</button>
+                class="text-xs text-gray-500 hover:text-gray-300 active:scale-95 transition">Reset to default</button>
             </div>
             <textarea id="set-boundary-prompt" rows="10"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
@@ -372,7 +372,7 @@
             <div class="flex items-center justify-between mb-1.5">
               <label class="text-sm text-gray-300">Verification Prompt</label>
               <button type="button" onclick="resetPrompt('verification')"
-                class="text-xs text-gray-500 hover:text-gray-300 transition">Reset to default</button>
+                class="text-xs text-gray-500 hover:text-gray-300 active:scale-95 transition">Reset to default</button>
             </div>
             <textarea id="set-verification-prompt" rows="6"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
@@ -383,7 +383,7 @@
         <!-- Save -->
         <div class="flex items-center gap-3">
           <button type="submit"
-            class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded px-5 py-2 text-sm transition">
+            class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium rounded px-5 py-2 text-sm transition">
             Save Settings
           </button>
           <span id="settings-status" class="text-sm text-gray-500"></span>
@@ -817,6 +817,82 @@ function renderDetail(scan) {
         </div>`;
       }
 
+      // AI Vision step: show verification, retries, reasoning, and raw AI response dropdowns
+      if (step.step_name === 'ai_vision' && step.output_summary) {
+        const out = step.output_summary;
+        html += '<div class="mt-2 ml-4 space-y-1">';
+
+        // Reasoning dropdown (from self-check)
+        if (out.reasoning || out.self_check) {
+          html += `<details class="text-xs"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">Reasoning &amp; Self-Check</summary>
+            <div class="mt-1 bg-gray-950 rounded p-2 text-gray-400 space-y-1">`;
+          if (out.reasoning) html += `<div><span class="text-gray-500">Reasoning:</span> ${esc(out.reasoning)}</div>`;
+          if (out.self_check) html += `<div><span class="text-gray-500">Self-check:</span> ${esc(out.self_check)}</div>`;
+          html += '</div></details>';
+        }
+
+        // Final Verification dropdown (the last verification result)
+        if (out.verification) {
+          const v = out.verification;
+          const vStatus = v.error ? 'Error' : (v.approved ? 'Approved' : 'Rejected');
+          const vColor = v.error ? 'text-yellow-400' : (v.approved ? 'text-green-400' : 'text-red-400');
+          const vLabel = (out.retry_count > 0) ? 'Final Verification' : 'Verification';
+          html += `<details class="text-xs"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">${vLabel}: <span class="${vColor}">${vStatus}</span></summary>
+            <div class="mt-1 bg-gray-950 rounded p-2 text-gray-400 space-y-1">`;
+          if (v.error) {
+            html += `<div>Error: ${esc(v.error)}</div>`;
+          } else {
+            html += `<div>Approved: <span class="${vColor} font-medium">${v.approved}</span></div>`;
+            html += `<div>Reason: ${esc(v.reason || '-')}</div>`;
+            html += `<div>Issues: ${esc(v.issues || '-')}</div>`;
+            if (v.tokens) html += `<div>Tokens: ${(v.tokens.total || 0).toLocaleString()} (${(v.tokens.prompt || 0).toLocaleString()}p + ${(v.tokens.completion || 0).toLocaleString()}c)</div>`;
+          }
+          html += '</div></details>';
+        }
+
+        // Retries list (each rejected attempt with boundary + verification)
+        if (out.retries && out.retries.length > 0) {
+          out.retries.forEach(r => {
+            const rv = r.verification;
+            const rb = r.boundary;
+            html += `<details class="text-xs"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">Rejected Attempt ${r.attempt}: <span class="text-red-400">${esc(rv.reason || 'rejected')}</span></summary>
+              <div class="mt-1 bg-gray-950 rounded p-2 text-gray-400 space-y-1">`;
+            // Boundary info
+            if (rb.pixel_bbox) html += `<div>Pixel bbox: (${rb.pixel_bbox.left_x}, ${rb.pixel_bbox.top_y}) → (${rb.pixel_bbox.right_x}, ${rb.pixel_bbox.bottom_y})</div>`;
+            html += `<div>Confidence: ${esc(rb.confidence || '-')}</div>`;
+            html += `<div>Type: ${esc(rb.facility_type || '-')}</div>`;
+            html += `<div>Buildings: ${rb.building_count ?? '-'}</div>`;
+            if (rb.reasoning) html += `<div>Reasoning: ${esc(rb.reasoning)}</div>`;
+            if (rb.self_check) html += `<div>Self-check: ${esc(rb.self_check)}</div>`;
+            if (rb.notes) html += `<div>Notes: ${esc(rb.notes)}</div>`;
+            if (rb.tokens) html += `<div>Boundary tokens: ${(rb.tokens.total || 0).toLocaleString()}</div>`;
+            // Verification info
+            html += `<div class="border-t border-gray-800 mt-1 pt-1">`;
+            html += `<div>Rejection reason: ${esc(rv.reason || '-')}</div>`;
+            html += `<div>Issues: ${esc(rv.issues || '-')}</div>`;
+            if (rv.tokens) html += `<div>Verification tokens: ${(rv.tokens.total || 0).toLocaleString()}</div>`;
+            html += '</div>';
+            html += '</div></details>';
+          });
+        }
+
+        // Raw AI Response dropdown (final boundary response)
+        if (step.ai_response_raw) {
+          html += `<details class="text-xs"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">Boundary AI Response (raw)</summary>
+            <pre class="mt-1 bg-gray-950 rounded p-2 text-gray-400 overflow-x-auto max-h-48">${esc(step.ai_response_raw)}</pre></details>`;
+        }
+
+        html += '</div>';
+      }
+
+      // AI Validation step: show raw AI response dropdown
+      if (step.step_name === 'ai_validation' && step.ai_response_raw) {
+        html += `<div class="mt-2 ml-4">
+          <details class="text-xs"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">Validation AI Response (raw)</summary>
+            <pre class="mt-1 bg-gray-950 rounded p-2 text-gray-400 overflow-x-auto max-h-48">${esc(step.ai_response_raw)}</pre></details>
+        </div>`;
+      }
+
       html += '</div>';
     });
 
@@ -1226,7 +1302,7 @@ function showResolveResult(result) {
       <span class="text-green-400">&#10003;</span>
       <span class="text-gray-200 font-medium">${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}</span>
       ${_sourceBadge(result.source)}
-      <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 ml-auto">Edit</button>
+      <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 active:scale-95 ml-auto">Edit</button>
     </div>
     <div class="text-xs text-gray-400 truncate" title="${esc(result.display_name)}">${esc(result.display_name)}</div>`;
 
@@ -1264,7 +1340,7 @@ function showResolveError(msg) {
   container.innerHTML = `<div class="bg-red-900/30 border border-red-800 rounded px-3 py-2 text-sm flex items-center gap-2">
     <span class="text-red-400">&#10007;</span>
     <span class="text-red-300">${esc(msg)}</span>
-    <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 ml-auto">Enter manually</button>
+    <button type="button" onclick="showManualOverride()" class="text-xs text-blue-400 hover:text-blue-300 active:scale-95 ml-auto">Enter manually</button>
   </div>`;
   container.classList.remove('hidden');
   document.getElementById('sf-submit').disabled = true;
