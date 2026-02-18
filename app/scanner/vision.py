@@ -77,6 +77,8 @@ class BoundaryResult:
     facility_type: str
     building_count: int
     notes: str
+    reasoning: str = ""
+    self_check: str = ""
     raw_response: str = ""
     prompt_text: str = ""
     usage: Optional[TokenUsage] = None
@@ -238,6 +240,8 @@ def detect_facility_boundary(
         f"- Coverage: approximately {width_m:.0f}m x {height_m:.0f}m\n\n"
         f"Respond with ONLY a JSON object:\n"
         f'{{"top_y": <int>, "bottom_y": <int>, "left_x": <int>, "right_x": <int>, '
+        f'"reasoning": "<how you identified the boundary>", '
+        f'"self_check": "<edge-by-edge verification>", '
         f'"confidence": "high/medium/low", "facility_type": "<type>", '
         f'"building_count": <int>, "notes": "<observations>"}}'
     )
@@ -289,6 +293,8 @@ def detect_facility_boundary(
             facility_type=data.get("facility_type", "unknown"),
             building_count=data.get("building_count", 0),
             notes=data.get("notes", ""),
+            reasoning=data.get("reasoning", ""),
+            self_check=data.get("self_check", ""),
             raw_response=text,
             prompt_text=full_prompt,
             usage=usage,

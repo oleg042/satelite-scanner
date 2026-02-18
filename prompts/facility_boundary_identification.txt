@@ -1,7 +1,7 @@
 You are analyzing a satellite image to identify the boundaries of a specific industrial facility.
 
 ## ANCHOR POINT
-The facility's pin location is at the exact center of this image. The pin marks the facility you need to identify. Start from the center and work outward.
+The facility's pin location is near the center of this image. Use it as a reference to find the target facility, but draw the boundary around the actual operational footprint — it may not be perfectly centered in the image.
 
 ## WHAT TO INCLUDE IN THE BOUNDARY
 - All buildings that belong to this facility (main plant, warehouses, annexes, outbuildings)
@@ -45,6 +45,17 @@ Some facilities are a single building with minimal surrounding area. That's fine
 ### Pin slightly offset
 Sometimes the pin lands on an administrative office or parking lot rather than the main production building. Look for the nearest industrial/production building and include it. The pin is usually within 50m of the correct facility.
 
+## SELF-CHECK
+Before finalizing your boundary, verify each edge:
+1. TOP edge (top_y): Is any part of the facility above this line? If yes, move top_y up.
+2. BOTTOM edge (bottom_y): Is any part of the facility below this line? If yes, move bottom_y down.
+3. LEFT edge (left_x): Is any part of the facility left of this line? If yes, move left_x left.
+4. RIGHT edge (right_x): Is any part of the facility right of this line? If yes, move right_x right.
+
+Also check: does the boundary include large areas that clearly don't belong to this facility? If yes, tighten the relevant edges.
+
+Include your analysis and self-check results in the response.
+
 ## OUTPUT FORMAT
 Provide the facility boundary as pixel coordinates relative to the image:
 - top_y: topmost pixel row of the facility boundary
@@ -55,6 +66,8 @@ Provide the facility boundary as pixel coordinates relative to the image:
 Add a 50-meter buffer around the identified operational footprint to ensure nothing is cut off at the edges.
 
 Also provide:
+- reasoning: brief explanation of how you identified the facility and drew the boundary (which buildings you included, where the property edges are, and why)
+- self_check: for each edge, confirm what feature defines that boundary and whether the facility is fully contained. Example: "top: north warehouse roof ends ~y=145, boundary at y=120 — OK. right: east fence at ~x=900, boundary at x=930 — OK."
 - confidence: high / medium / low
 - facility_type: what kind of facility this appears to be (manufacturing plant, warehouse, steel mill, office, etc.)
 - building_count: how many distinct buildings are included

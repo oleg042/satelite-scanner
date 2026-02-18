@@ -481,6 +481,9 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 verification = None
                 verification_error = None
                 original_boundary = None
+                retries = []  # list of rejected attempt dicts
+                retry_count = 0
+                max_retries = 2
 
                 if boundary:
                     scan.ai_confidence = boundary.confidence
@@ -523,6 +526,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                                 "facility_type": boundary.facility_type,
                                 "building_count": boundary.building_count,
                                 "notes": boundary.notes,
+                                "reasoning": boundary.reasoning,
+                                "self_check": boundary.self_check,
                                 "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
                                                "left_x": boundary.left_x, "right_x": boundary.right_x},
                             }),
@@ -555,34 +560,68 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         verification_error = str(e)
                         logger.warning("Verification call failed: %s", e)
 
-                    if verification and not verification.approved:
-                        logger.info("Boundary rejected: %s. Retrying with feedback...", verification.reason)
+                    # Retry loop: up to max_retries if verification rejects
+                    while verification and not verification.approved and retry_count < max_retries:
+                        retry_count += 1
+                        logger.info(
+                            "Boundary rejected (attempt %d/%d): %s. Retrying with feedback...",
+                            retry_count, max_retries, verification.reason,
+                        )
 
-                        # Preserve original detection before retry overwrites it
-                        original_boundary = {
-                            "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
-                                           "left_x": boundary.left_x, "right_x": boundary.right_x},
-                            "confidence": boundary.confidence,
-                            "facility_type": boundary.facility_type,
-                            "building_count": boundary.building_count,
-                            "notes": boundary.notes,
-                            "raw_response": boundary.raw_response,
-                            "prompt_text": boundary.prompt_text,
-                            "tokens": {
-                                "prompt": boundary.usage.prompt_tokens,
-                                "completion": boundary.usage.completion_tokens,
-                                "total": boundary.usage.total_tokens,
-                            } if boundary.usage else None,
+                        # Record this rejected attempt
+                        rejected_attempt = {
+                            "attempt": retry_count,
+                            "boundary": {
+                                "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
+                                               "left_x": boundary.left_x, "right_x": boundary.right_x},
+                                "confidence": boundary.confidence,
+                                "facility_type": boundary.facility_type,
+                                "building_count": boundary.building_count,
+                                "notes": boundary.notes,
+                                "reasoning": boundary.reasoning,
+                                "self_check": boundary.self_check,
+                                "raw_response": boundary.raw_response,
+                                "tokens": {
+                                    "prompt": boundary.usage.prompt_tokens,
+                                    "completion": boundary.usage.completion_tokens,
+                                    "total": boundary.usage.total_tokens,
+                                } if boundary.usage else None,
+                            },
+                            "verification": {
+                                "approved": verification.approved,
+                                "reason": verification.reason,
+                                "issues": verification.issues,
+                                "raw_response": verification.raw_response,
+                                "tokens": {
+                                    "prompt": verification.usage.prompt_tokens,
+                                    "completion": verification.usage.completion_tokens,
+                                    "total": verification.usage.total_tokens,
+                                } if verification.usage else None,
+                            },
                         }
 
-                        # Retry boundary detection with rejection feedback
+                        # On first rejection, save as original_boundary for backward compat
+                        if retry_count == 1:
+                            original_boundary = rejected_attempt["boundary"].copy()
+                            original_boundary["prompt_text"] = boundary.prompt_text
+
+                        retries.append(rejected_attempt)
+
+                        # Build retry feedback with specific coords and image dims
                         retry_extra = (
-                            f"\n\n## IMPORTANT CORRECTION\n"
-                            f"A previous attempt was rejected: {verification.reason}\n"
-                            f"Issues found: {verification.issues}\n"
-                            f"Please correct these issues in your new boundary detection."
+                            f"\n\n## IMPORTANT CORRECTION (attempt {retry_count + 1})\n"
+                            f"A previous attempt returned this boundary:\n"
+                            f"  top_y={boundary.top_y}, bottom_y={boundary.bottom_y}, "
+                            f"left_x={boundary.left_x}, right_x={boundary.right_x}\n"
+                            f"  (on a {ov_img.width}x{ov_img.height} image)\n\n"
+                            f"This was rejected because: {verification.reason}\n"
+                            f"Specific issues: {verification.issues}\n\n"
+                            f"Adjust the boundary to fix these problems. For example:\n"
+                            f"- If a building was cut off, expand that edge.\n"
+                            f"- If the boundary was too wide, pull in the edges that include non-facility areas."
                         )
                         retry_prompt = (config["boundary_prompt"] or "") + retry_extra
+
                         try:
                             boundary = await asyncio.to_thread(
                                 detect_facility_boundary,
@@ -594,13 +633,32 @@ async def run_pipeline(scan_id, db: AsyncSession):
                             if _is_fatal_ai_error(e):
                                 raise RuntimeError(f"OpenAI API account error: {e}") from e
                             boundary = None
-                            logger.warning("Boundary retry failed: %s", e)
+                            logger.warning("Boundary retry %d failed: %s", retry_count, e)
+                            break
 
-                        if boundary:
-                            scan.ai_confidence = boundary.confidence
-                            scan.ai_facility_type = boundary.facility_type
-                            scan.ai_building_count = boundary.building_count
-                            scan.ai_notes = boundary.notes
+                        if not boundary:
+                            break
+
+                        # Update scan with latest boundary
+                        scan.ai_confidence = boundary.confidence
+                        scan.ai_facility_type = boundary.facility_type
+                        scan.ai_building_count = boundary.building_count
+                        scan.ai_notes = boundary.notes
+
+                        # Re-verify the retried boundary
+                        verification = None
+                        try:
+                            verification = await asyncio.to_thread(
+                                verify_facility_boundary,
+                                abs_path, facility_name, boundary,
+                                config["api_key"], config["validation_model"],
+                                config["verification_prompt"],
+                            )
+                        except Exception as e:
+                            if _is_fatal_ai_error(e):
+                                raise RuntimeError(f"OpenAI API account error: {e}") from e
+                            logger.warning("Retry %d verification failed: %s", retry_count, e)
+                            break  # accept boundary as-is if verification errors
 
                     # Convert pixel bbox to lat/lng
                     if boundary:
@@ -609,7 +667,15 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         raw_bbox = (min(lat1, lat2), min(lng1, lng2), max(lat1, lat2), max(lng1, lng2))
                         final_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
                         method = ScanMethod.ai_vision
-                        verified_str = "verified" if (not verification or verification.approved) else "retry after rejection"
+
+                        # Determine verification status string
+                        if not verification or verification.approved:
+                            if retry_count == 0:
+                                verified_str = "verified"
+                            else:
+                                verified_str = f"verified after {retry_count} {'retry' if retry_count == 1 else 'retries'}"
+                        else:
+                            verified_str = f"unverified (rejected after {retry_count + 1} attempts)"
                         vision_decision = (
                             f"AI detected facility boundary ({verified_str}) — confidence: {boundary.confidence}, "
                             f"type: {boundary.facility_type}, {boundary.building_count} buildings. "
@@ -618,11 +684,32 @@ async def run_pipeline(scan_id, db: AsyncSession):
                             f"→ buffered: {[round(x, 6) for x in final_bbox]}"
                         )
                     else:
-                        vision_decision = f"AI boundary detection failed after retry. Will fall back to radius."
+                        if retry_count > 0:
+                            vision_decision = f"AI boundary detection failed after {retry_count} {'retry' if retry_count == 1 else 'retries'}. Will fall back to radius."
+                        else:
+                            vision_decision = f"AI boundary detection failed: {boundary_error or 'unknown error'}. Will fall back to radius."
                 else:
                     vision_decision = f"AI boundary detection failed: {boundary_error or 'unknown error'}. Will fall back to radius."
 
                 ai_elapsed = int((time.monotonic() - ai_start) * 1000)
+
+                # Build final verification dict for output_summary
+                final_verification = None
+                if verification:
+                    final_verification = {
+                        "model": config["validation_model"],
+                        "approved": verification.approved,
+                        "reason": verification.reason,
+                        "issues": verification.issues,
+                        "raw_response": verification.raw_response,
+                        "tokens": {
+                            "prompt": verification.usage.prompt_tokens,
+                            "completion": verification.usage.completion_tokens,
+                            "total": verification.usage.total_tokens,
+                        } if verification.usage else None,
+                    }
+                elif verification_error:
+                    final_verification = {"error": verification_error}
 
                 await _record_step(
                     db, scan_id, step_num, "ai_vision",
@@ -641,24 +728,16 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         "facility_type": boundary.facility_type if boundary else None,
                         "building_count": boundary.building_count if boundary else None,
                         "notes": boundary.notes if boundary else None,
+                        "reasoning": boundary.reasoning if boundary else None,
+                        "self_check": boundary.self_check if boundary else None,
                         "pixel_bbox": {"top_y": boundary.top_y, "bottom_y": boundary.bottom_y,
                                        "left_x": boundary.left_x, "right_x": boundary.right_x} if boundary else None,
                         "raw_geo_bbox": list(raw_bbox) if final_bbox and method == ScanMethod.ai_vision else None,
                         "detected_bbox": list(final_bbox) if final_bbox and method == ScanMethod.ai_vision else None,
                         "boundary_error": boundary_error,
-                        "verification": {
-                            "model": config["validation_model"],
-                            "approved": verification.approved,
-                            "reason": verification.reason,
-                            "issues": verification.issues,
-                            "prompt": verification.prompt_text,
-                            "raw_response": verification.raw_response,
-                            "tokens": {
-                                "prompt": verification.usage.prompt_tokens,
-                                "completion": verification.usage.completion_tokens,
-                                "total": verification.usage.total_tokens,
-                            } if verification.usage else None,
-                        } if verification else {"error": verification_error} if verification_error else None,
+                        "verification": final_verification,
+                        "retries": retries if retries else None,
+                        "retry_count": retry_count,
                         "original_detection": original_boundary,
                     }),
                     decision=vision_decision,
