@@ -82,6 +82,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     validation_prompt = await _get_setting(db, "validation_prompt", "")
     boundary_prompt = await _get_setting(db, "boundary_prompt", "")
     verification_prompt = await _get_setting(db, "verification_prompt", "")
+    correction_prompt = await _get_setting(db, "correction_prompt", "")
 
     return {
         "api_key": api_key,
@@ -93,6 +94,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "validation_prompt": validation_prompt,
         "boundary_prompt": boundary_prompt,
         "verification_prompt": verification_prompt,
+        "correction_prompt": correction_prompt,
     }
 
 
@@ -614,6 +616,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                                 correct_facility_boundary,
                                 abs_path, boundary, verification,
                                 config["api_key"], config["validation_model"],
+                                config["correction_prompt"],
                             )
                         except Exception as e:
                             if _is_fatal_ai_error(e):

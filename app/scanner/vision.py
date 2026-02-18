@@ -3,7 +3,6 @@
 import base64
 import json
 import logging
-import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -12,40 +11,6 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# Default prompts — stored in DB settings and overridable via API
-DEFAULT_VALIDATION_PROMPT = """You are analyzing a satellite image of an industrial facility.
-
-The facility "{name}" is located at ({lat}, {lng}). An OSM bounding box was used to capture
-this overview image. The image covers approximately {width_m:.0f}m x {height_m:.0f}m.
-
-Look at the image and determine:
-1. Is the entire facility visible and not cut off at any edge?
-2. Does the bounding box appear to fully contain the facility's operational footprint?
-
-Respond with ONLY a JSON object:
-{{
-  "approved": true/false,
-  "reason": "brief explanation",
-  "facility_type": "what kind of facility this appears to be",
-  "notes": "any observations"
-}}"""
-
-DEFAULT_BOUNDARY_PROMPT = ""  # Loaded from prompts/facility_boundary_identification.txt
-
-
-def _load_default_boundary_prompt() -> str:
-    """Load the boundary prompt from file."""
-    prompt_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "prompts",
-        "facility_boundary_identification.txt",
-    )
-    try:
-        with open(prompt_path, "r") as f:
-            return f.read()
-    except OSError:
-        logger.warning("Could not load boundary prompt from %s", prompt_path)
-        return ""
 
 
 @dataclass
@@ -152,9 +117,6 @@ def validate_osm_bbox(
         logger.warning("No API key — skipping validation")
         return None
 
-    if not prompt_template:
-        prompt_template = DEFAULT_VALIDATION_PROMPT
-
     prompt = prompt_template.format(
         name=name, lat=lat, lng=lng, width_m=width_m, height_m=height_m
     )
@@ -220,13 +182,6 @@ def detect_facility_boundary(
     """
     if not api_key:
         logger.warning("No API key — skipping boundary detection")
-        return None
-
-    # Load boundary prompt
-    if not prompt_template:
-        prompt_template = _load_default_boundary_prompt()
-    if not prompt_template:
-        logger.error("No boundary prompt available")
         return None
 
     img_b64, img_w, img_h, scale = _prepare_image_for_ai(image_path)
@@ -304,29 +259,6 @@ def detect_facility_boundary(
         raise
 
 
-DEFAULT_VERIFICATION_PROMPT = """You are verifying an AI-detected facility boundary on a satellite image.
-
-The facility "{name}" should be centered in this image. A red rectangle has been drawn showing the detected boundary.
-
-Check the following:
-1. Is the target facility (the building/campus at or near the image center) FULLY inside the red rectangle, with no parts cut off at the edges?
-2. For each edge of the rectangle (top, bottom, left, right), assess whether it closely follows the facility boundary on that side. A small margin (10-20%) is acceptable. Note which specific edges, if any, extend too far and include areas clearly belonging to neighboring properties or unrelated to the facility.
-3. Is the rectangle centered roughly on the facility, or is it significantly shifted away from center?
-
-Respond with ONLY a JSON object:
-{{
-  "approved": true/false,
-  "reason": "brief explanation",
-  "issues": "summary of problems",
-  "edge_feedback": {{
-    "top": "ok or description of problem",
-    "bottom": "ok or description of problem",
-    "left": "ok or description of problem",
-    "right": "ok or description of problem"
-  }}
-}}"""
-
-
 @dataclass
 class VerificationResult:
     approved: bool
@@ -372,8 +304,6 @@ def verify_facility_boundary(
         img.close()
         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-        if not prompt_template:
-            prompt_template = DEFAULT_VERIFICATION_PROMPT
         prompt = prompt_template.format(name=name)
 
         logger.info("Calling %s for boundary verification...", model)
@@ -417,38 +347,13 @@ def verify_facility_boundary(
         raise
 
 
-DEFAULT_CORRECTION_PROMPT = """You are correcting a facility boundary on a satellite image.
-A red rectangle shows the current boundary that needs adjustment.
-
-Current boundary coordinates (pixels):
-  top_y={top_y}, bottom_y={bottom_y}, left_x={left_x}, right_x={right_x}
-  Image size: {img_w}x{img_h} pixels
-
-The boundary was REJECTED. Per-edge assessment:
-- TOP: {edge_top}
-- BOTTOM: {edge_bottom}
-- LEFT: {edge_left}
-- RIGHT: {edge_right}
-
-Instructions:
-- For edges marked "too far": Look at the image and pull that edge inward to closely
-  follow the facility's actual footprint on that side.
-- For edges where a building/area is "cut off": Push that edge outward to fully contain
-  the facility on that side.
-- For edges marked "ok": Keep the coordinate the same or very close.
-- Do NOT add buffer or padding — that is handled automatically in post-processing.
-
-Respond with ONLY a JSON object:
-{{"top_y": <int>, "bottom_y": <int>, "left_x": <int>, "right_x": <int>,
-  "reasoning": "<what you adjusted and why>", "confidence": "high/medium/low"}}"""
-
-
 def correct_facility_boundary(
     image_path: str,
     boundary: BoundaryResult,
     verification: VerificationResult,
     api_key: str,
     model: str,
+    prompt_template: str = "",
 ) -> Optional[BoundaryResult]:
     """Adjust an existing boundary using lightweight correction instead of full re-detection.
 
@@ -517,7 +422,7 @@ def correct_facility_boundary(
         edge_left = edge_fb.get("left", fallback)
         edge_right = edge_fb.get("right", fallback)
 
-        prompt = DEFAULT_CORRECTION_PROMPT.format(
+        prompt = prompt_template.format(
             top_y=prompt_top, bottom_y=prompt_bottom,
             left_x=prompt_left, right_x=prompt_right,
             img_w=ai_w, img_h=ai_h,
