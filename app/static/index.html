@@ -269,14 +269,44 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm text-gray-300 mb-1.5">Validation Model</label>
-              <input id="set-validation-model" type="text" placeholder="gpt-4o-mini"
+              <select id="set-validation-model"
                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="">Select model...</option>
+                <optgroup label="Flagship">
+                  <option value="gpt-5.2">GPT-5.2 (Latest flagship)</option>
+                  <option value="gpt-5.1">GPT-5.1</option>
+                  <option value="gpt-5">GPT-5</option>
+                  <option value="gpt-4.1">GPT-4.1 (1M context)</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </optgroup>
+                <optgroup label="Efficient">
+                  <option value="gpt-5-mini">GPT-5 Mini</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 Mini (1M context)</option>
+                  <option value="gpt-4.1-nano">GPT-4.1 Nano (cheapest)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                </optgroup>
+              </select>
               <p class="text-xs text-gray-600 mt-1">Used for OSM bbox validation (step 2)</p>
             </div>
             <div>
               <label class="block text-sm text-gray-300 mb-1.5">Boundary Model</label>
-              <input id="set-boundary-model" type="text" placeholder="gpt-4o"
+              <select id="set-boundary-model"
                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="">Select model...</option>
+                <optgroup label="Flagship">
+                  <option value="gpt-5.2">GPT-5.2 (Latest flagship)</option>
+                  <option value="gpt-5.1">GPT-5.1</option>
+                  <option value="gpt-5">GPT-5</option>
+                  <option value="gpt-4.1">GPT-4.1 (1M context)</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </optgroup>
+                <optgroup label="Efficient">
+                  <option value="gpt-5-mini">GPT-5 Mini</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 Mini (1M context)</option>
+                  <option value="gpt-4.1-nano">GPT-4.1 Nano (cheapest)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                </optgroup>
+              </select>
               <p class="text-xs text-gray-600 mt-1">Used for AI vision fallback (step 3)</p>
             </div>
           </div>
