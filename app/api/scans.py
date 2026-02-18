@@ -34,6 +34,7 @@ def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
             type=ss.type.value if hasattr(ss.type, "value") else ss.type,
             filename=ss.filename,
             url=f"/api/screenshots/{ss.id}",
+            thumb_url=f"/api/screenshots/{ss.id}?thumb=1",
             width=ss.width,
             height=ss.height,
             zoom=ss.zoom,

@@ -54,6 +54,7 @@ class ScreenshotResponse(BaseModel):
     type: str
     filename: str
     url: str
+    thumb_url: str = ""
     width: Optional[int] = None
     height: Optional[int] = None
     zoom: Optional[int] = None

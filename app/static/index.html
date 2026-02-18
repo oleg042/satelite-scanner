@@ -764,18 +764,19 @@ function renderDetail(scan) {
       const label = `${ss.type} (z${ss.zoom || '?'})${sizeStr}`;
       const overlayArg = overlayData ? JSON.stringify(overlayData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
 
+      const thumbSrc = ss.thumb_url || ss.url;
       if (overlayData) {
         const bboxJson = JSON.stringify(overlayData.bbox).replace(/"/g, '&quot;');
         html += `<div class="text-center">
           <div class="relative inline-block bbox-overlay-container cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', ${overlayArg})" title="Click to enlarge">
-              <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
+              <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
                 onload="drawBoundaryOverlay(this, ${bboxJson}, ${overlayData.origW}, ${overlayData.origH})">
           </div>
           <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr} <span class="text-red-400">■</span> AI boundary</div>
         </div>`;
       } else {
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null)" title="Click to enlarge">
-            <img src="${ss.url}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
+            <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
           <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
         </div>`;
       }
