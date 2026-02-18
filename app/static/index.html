@@ -1051,8 +1051,11 @@ async function fetchScans() {
         }
       }
     });
+    const oldScans = S.scans;
     S.scans = newScans;
-    renderTable();
+    const changed = newScans.length !== oldScans.length ||
+      newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status);
+    if (changed) renderTable();
     managePoll();
   } catch (e) {
     toast('Failed to load scans: ' + e.message, 'error');
