@@ -343,6 +343,7 @@ const S = {
   expanded: {},
   expandedOpen: {},
   selected: new Set(),
+  lastCheckedIdx: null,
   pollTimer: null,
   currentPage: 'scans',
   activePill: 'all',
@@ -547,11 +548,24 @@ function renderTable() {
     row.addEventListener('click', () => toggleRow(row.dataset.id));
   });
 
-  // Checkbox handlers
-  tbody.querySelectorAll('.row-check').forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) S.selected.add(cb.dataset.id);
-      else S.selected.delete(cb.dataset.id);
+  // Checkbox handlers (with shift-click range selection)
+  const checkboxes = [...tbody.querySelectorAll('.row-check')];
+  checkboxes.forEach((cb, idx) => {
+    cb.addEventListener('click', (e) => {
+      if (e.shiftKey && S.lastCheckedIdx !== null) {
+        const from = Math.min(S.lastCheckedIdx, idx);
+        const to = Math.max(S.lastCheckedIdx, idx);
+        const checked = cb.checked;
+        for (let i = from; i <= to; i++) {
+          checkboxes[i].checked = checked;
+          if (checked) S.selected.add(checkboxes[i].dataset.id);
+          else S.selected.delete(checkboxes[i].dataset.id);
+        }
+      } else {
+        if (cb.checked) S.selected.add(cb.dataset.id);
+        else S.selected.delete(cb.dataset.id);
+      }
+      S.lastCheckedIdx = idx;
       updateDeleteBtn();
     });
   });
