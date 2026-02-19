@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import urllib.parse
 
 import httpx
@@ -12,8 +13,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.models import Setting
+from app.database import async_session, get_db
+from app.models import Screenshot, Setting
 from app.schemas import HealthResponse, SettingsResponse, SettingsUpdate
 from app.config import settings as app_settings
 from app.scanner.geocode import serper_maps_resolve
@@ -170,6 +171,69 @@ async def get_storage():
         "screenshots_mb": to_mb(ss_bytes),
         "screenshots_files": ss_files,
         "other_mb": to_mb(other_bytes),
+    }
+
+
+@api_router.post("/storage/cleanup")
+async def cleanup_storage():
+    """One-time cleanup: nuke tile_cache and delete orphaned screenshot files."""
+    volume = app_settings.volume_path
+    tile_cache_path = os.path.join(volume, "tile_cache")
+    screenshots_path = os.path.join(volume, "screenshots")
+    to_mb = lambda b: round(b / (1024 * 1024), 1)
+
+    # --- Before stats ---
+    tile_before_bytes, tile_before_files = _dir_stats(tile_cache_path)
+    ss_before_bytes, ss_before_files = _dir_stats(screenshots_path)
+    total_before_bytes, _ = _dir_stats(volume)
+
+    # --- 1. Nuke entire tile_cache directory ---
+    tile_deleted = tile_before_files
+    shutil.rmtree(tile_cache_path, ignore_errors=True)
+
+    # --- 2. Delete orphaned screenshot files ---
+    async with async_session() as db:
+        result = await db.execute(select(Screenshot.file_path))
+        valid_paths = {row[0] for row in result.all() if row[0]}
+
+    orphan_deleted = 0
+    if os.path.isdir(screenshots_path):
+        for dirpath, _, filenames in os.walk(screenshots_path, topdown=False):
+            for fname in filenames:
+                abs_path = os.path.join(dirpath, fname)
+                rel_path = os.path.relpath(abs_path, volume)
+                if rel_path not in valid_paths:
+                    try:
+                        os.unlink(abs_path)
+                        orphan_deleted += 1
+                    except OSError:
+                        pass
+            # Remove empty directories
+            try:
+                os.rmdir(dirpath)
+            except OSError:
+                pass  # not empty or doesn't exist
+
+    # --- After stats ---
+    tile_after_bytes, _ = _dir_stats(tile_cache_path)
+    ss_after_bytes, _ = _dir_stats(screenshots_path)
+    total_after_bytes, _ = _dir_stats(volume)
+
+    return {
+        "before": {
+            "tile_cache_mb": to_mb(tile_before_bytes),
+            "screenshots_mb": to_mb(ss_before_bytes),
+            "total_mb": to_mb(total_before_bytes),
+        },
+        "after": {
+            "tile_cache_mb": to_mb(tile_after_bytes),
+            "screenshots_mb": to_mb(ss_after_bytes),
+            "total_mb": to_mb(total_after_bytes),
+        },
+        "deleted": {
+            "tile_cache_files": tile_deleted,
+            "screenshot_files": orphan_deleted,
+        },
     }
 
 
