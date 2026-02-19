@@ -245,5 +245,7 @@ def crop_to_bbox(
     crop_bottom = min(grid_info["full_h"], int((nw_lat - min_lat) * px_per_deg_lat))
 
     if crop_right > crop_left and crop_bottom > crop_top:
-        return image.crop((crop_left, crop_top, crop_right, crop_bottom))
-    return image
+        result = image.crop((crop_left, crop_top, crop_right, crop_bottom))
+        result.load()  # force pixel data copy — safe to close source after this
+        return result
+    return image.copy()  # copy so caller can safely close source

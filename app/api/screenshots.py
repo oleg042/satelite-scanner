@@ -23,10 +23,13 @@ def _thumb_path(abs_path: str) -> str:
 
 
 def _ensure_thumbnail(abs_path: str) -> str:
-    """Generate a thumbnail if it doesn't exist yet. Returns the thumb path."""
+    """Generate a thumbnail if it doesn't exist yet or is stale. Returns the thumb path."""
     thumb = _thumb_path(abs_path)
     if os.path.isfile(thumb):
-        return thumb
+        # Regenerate if source is newer than cached thumbnail
+        if os.path.getmtime(abs_path) <= os.path.getmtime(thumb):
+            return thumb
+        os.remove(thumb)  # stale — delete and regenerate below
     img = PILImage.open(abs_path)
     if img.height <= THUMB_MAX_HEIGHT:
         img.close()
@@ -60,5 +63,8 @@ async def get_screenshot(screenshot_id: UUID, thumb: bool = Query(False)):
         return FileResponse(
             serve_path,
             media_type="image/png",
-            headers={"Content-Disposition": f"inline; filename=\"{ss.filename}\""},
+            headers={
+                "Content-Disposition": f"inline; filename=\"{ss.filename}\"",
+                "Cache-Control": "no-cache, must-revalidate",
+            },
         )
