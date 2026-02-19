@@ -46,6 +46,8 @@ class SettingsUpdate(BaseModel):
     boundary_prompt: Optional[str] = None
     verification_prompt: Optional[str] = None
     verification_model: Optional[str] = None
+    correction_mode: Optional[str] = None
+    verification_correction_prompt: Optional[str] = None
 
 
 # --- Responses ---
@@ -119,6 +121,8 @@ class SettingsResponse(BaseModel):
     boundary_prompt: str = ""
     verification_prompt: str = ""
     verification_model: str = ""
+    correction_mode: str = ""
+    verification_correction_prompt: str = ""
 
 
 class ScanStepResponse(BaseModel):

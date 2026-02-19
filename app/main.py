@@ -16,7 +16,7 @@ from app.api.router import api_router, health_router, shutdown_browser
 from app.config import settings
 from app.database import engine
 from app.models import Base, Setting
-from app.worker import worker_pool
+from app.worker import recover_stuck_scans, stale_scan_watchdog, worker_pool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -121,20 +121,27 @@ async def lifespan(app: FastAPI):
 
     await _init_db()
 
+    # Recover scans stuck from a previous crash/restart
+    await recover_stuck_scans()
+
     # Start background worker
     worker_task = asyncio.create_task(worker_pool())
     logger.info("Background worker started")
+
+    # Start stale scan watchdog
+    watchdog_task = asyncio.create_task(stale_scan_watchdog())
 
     yield
 
     # Shutdown
     await shutdown_browser()
+    watchdog_task.cancel()
     worker_task.cancel()
     try:
-        await worker_task
+        await asyncio.gather(worker_task, watchdog_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
-    logger.info("Background worker stopped")
+    logger.info("Background worker and watchdog stopped")
 
 
 app = FastAPI(

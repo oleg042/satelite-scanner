@@ -347,6 +347,217 @@ def verify_facility_boundary(
         raise
 
 
+@dataclass
+class VerifyCorrectionResult:
+    """V2 combined verify-and-correct result."""
+    verification: VerificationResult
+    correction: Optional[BoundaryResult] = None
+
+
+def verify_and_correct_boundary(
+    image_path: str,
+    name: str,
+    lat: float,
+    lng: float,
+    width_m: float,
+    height_m: float,
+    boundary: BoundaryResult,
+    api_key: str,
+    model: str,
+    boundary_prompt: str = "",
+    vc_prompt: str = "",
+    previous_verification: Optional[VerificationResult] = None,
+) -> Optional[VerifyCorrectionResult]:
+    """V2 single-agent: verify boundary AND provide corrected coordinates if rejected.
+
+    Combines verification and correction into one API call, eliminating the lossy
+    handoff between separate verify/correct agents.
+
+    Returns VerifyCorrectionResult or None on error.
+    """
+    if not api_key:
+        return None
+
+    try:
+        # Draw red rectangle on image (same as verify/correct)
+        img = Image.open(image_path).copy()
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        for offset in range(3):
+            draw.rectangle(
+                [boundary.left_x - offset, boundary.top_y - offset,
+                 boundary.right_x + offset, boundary.bottom_y + offset],
+                outline="red",
+            )
+
+        # Prepare image (downscale if needed)
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        orig_w, orig_h = img.size
+        img.close()
+
+        max_long_side = 2048
+        long_side = max(orig_w, orig_h)
+        if long_side > max_long_side:
+            ratio = max_long_side / long_side
+            new_w = int(orig_w * ratio)
+            new_h = int(orig_h * ratio)
+            img2 = Image.open(io.BytesIO(buf.getvalue()))
+            resized = img2.resize((new_w, new_h), Image.LANCZOS)
+            img2.close()
+            buf2 = io.BytesIO()
+            resized.save(buf2, format="PNG")
+            resized.close()
+            img_b64 = base64.b64encode(buf2.getvalue()).decode("utf-8")
+            scale = orig_w / new_w
+            ai_w, ai_h = new_w, new_h
+            prompt_top = round(boundary.top_y / scale)
+            prompt_bottom = round(boundary.bottom_y / scale)
+            prompt_left = round(boundary.left_x / scale)
+            prompt_right = round(boundary.right_x / scale)
+        else:
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            scale = 1.0
+            ai_w, ai_h = orig_w, orig_h
+            prompt_top = boundary.top_y
+            prompt_bottom = boundary.bottom_y
+            prompt_left = boundary.left_x
+            prompt_right = boundary.right_x
+
+        # Build prompt: boundary_prompt + CORRECTION CONTEXT (if retry) + vc_prompt + IMAGE CONTEXT
+        full_prompt = boundary_prompt
+
+        # Add correction context on retries (previous coords + per-edge feedback)
+        if previous_verification:
+            edge_fb = previous_verification.edge_feedback or {}
+            fallback = previous_verification.reason or previous_verification.issues or "no details"
+            edge_top = edge_fb.get("top", fallback)
+            edge_bottom = edge_fb.get("bottom", fallback)
+            edge_left = edge_fb.get("left", fallback)
+            edge_right = edge_fb.get("right", fallback)
+
+            full_prompt += (
+                f"\n\n## CORRECTION CONTEXT\n"
+                f"A red rectangle on the image shows a previous boundary attempt that was rejected.\n\n"
+                f"Previous boundary coordinates (pixels):\n"
+                f"  top_y={prompt_top}, bottom_y={prompt_bottom}, left_x={prompt_left}, right_x={prompt_right}\n\n"
+                f"The verification agent assessed each edge:\n"
+                f"- TOP: {edge_top}\n"
+                f"- BOTTOM: {edge_bottom}\n"
+                f"- LEFT: {edge_left}\n"
+                f"- RIGHT: {edge_right}\n\n"
+                f"Re-evaluate the facility boundary considering this feedback. The verification notes carry\n"
+                f"significant weight — edges flagged as extending too far likely need pulling inward, edges\n"
+                f"flagged as cutting off the facility likely need pushing outward. Edges marked 'ok' should\n"
+                f"stay close to their current position.\n\n"
+                f"However, do NOT blindly follow the feedback — perform your own full analysis using the\n"
+                f"boundary identification rules above. If you disagree with the verification on a specific\n"
+                f"edge, explain why in your reasoning."
+            )
+
+        # Add V2 task instructions from DB
+        if vc_prompt:
+            full_prompt += f"\n\n{vc_prompt}"
+
+        # Add image context with dual response schema
+        full_prompt += (
+            f"\n\n## IMAGE CONTEXT\n"
+            f"- Facility name: {name}\n"
+            f"- Center coordinates: ({lat}, {lng})\n"
+            f"- Image dimensions: {ai_w}px x {ai_h}px\n"
+            f"- Coverage: approximately {width_m:.0f}m x {height_m:.0f}m\n\n"
+            f"A red rectangle is drawn on the image showing the current boundary.\n\n"
+            f"If the boundary is CORRECT, respond with ONLY this JSON:\n"
+            f'{{"approved": true, "reason": "<why it is correct>", '
+            f'"edge_feedback": {{"top": "<assessment>", "bottom": "<assessment>", '
+            f'"left": "<assessment>", "right": "<assessment>"}}}}\n\n'
+            f"If the boundary is INCORRECT, respond with ONLY this JSON:\n"
+            f'{{"approved": false, "reason": "<why it is wrong>", "issues": "<specific issues>", '
+            f'"edge_feedback": {{"top": "<assessment>", "bottom": "<assessment>", '
+            f'"left": "<assessment>", "right": "<assessment>"}}, '
+            f'"top_y": <int>, "bottom_y": <int>, "left_x": <int>, "right_x": <int>, '
+            f'"reasoning": "<how you identified the corrected boundary>", '
+            f'"self_check": "<edge-by-edge verification of your corrected coords>", '
+            f'"confidence": "high/medium/low", "facility_type": "<type>", '
+            f'"building_count": <int>, "notes": "<observations>"}}'
+        )
+
+        logger.info("Calling %s for V2 verify-and-correct...", model)
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            max_completion_tokens=8192,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                    },
+                    {"type": "text", "text": full_prompt},
+                ],
+            }],
+        )
+        text = response.choices[0].message.content.strip()
+        logger.info("V2 verify-and-correct response: %s", text)
+
+        usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            reasoning_tokens=getattr(response.usage.completion_tokens_details, "reasoning_tokens", 0) or 0,
+            total_tokens=response.usage.total_tokens,
+        )
+
+        data = _parse_json_response(text)
+
+        # Always build the verification result
+        verification = VerificationResult(
+            approved=data.get("approved", False),
+            reason=data.get("reason", ""),
+            issues=data.get("issues", ""),
+            edge_feedback=data.get("edge_feedback"),
+            raw_response=text,
+            prompt_text=full_prompt,
+            usage=usage,
+        )
+
+        # Build correction result only when rejected AND coordinates are present
+        correction = None
+        if not verification.approved and all(k in data for k in ("top_y", "bottom_y", "left_x", "right_x")):
+            # Scale pixel coords back to original image space
+            top_y = data["top_y"]
+            bottom_y = data["bottom_y"]
+            left_x = data["left_x"]
+            right_x = data["right_x"]
+            if scale != 1.0:
+                top_y = round(top_y * scale)
+                bottom_y = round(bottom_y * scale)
+                left_x = round(left_x * scale)
+                right_x = round(right_x * scale)
+
+            correction = BoundaryResult(
+                top_y=top_y,
+                bottom_y=bottom_y,
+                left_x=left_x,
+                right_x=right_x,
+                confidence=data.get("confidence", "medium"),
+                facility_type=data.get("facility_type", boundary.facility_type),
+                building_count=data.get("building_count", boundary.building_count),
+                notes=data.get("notes", boundary.notes),
+                reasoning=data.get("reasoning", ""),
+                self_check=data.get("self_check", ""),
+                raw_response=text,
+                prompt_text=full_prompt,
+                usage=usage,
+            )
+
+        return VerifyCorrectionResult(verification=verification, correction=correction)
+    except Exception as e:
+        logger.error("V2 verify-and-correct API error: %s", e)
+        raise
+
+
 def correct_facility_boundary(
     image_path: str,
     name: str,

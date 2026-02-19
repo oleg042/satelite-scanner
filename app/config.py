@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     tile_delay_s: float = 0.05
     tile_concurrency: int = 10
     worker_concurrency: int = 3
+    stale_scan_timeout_minutes: int = 30
     search_radius_m: int = 200
     fallback_radius_m: int = 75
     overview_radius_m: int = 400

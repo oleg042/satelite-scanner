@@ -334,6 +334,15 @@
               </select>
               <p class="text-xs text-gray-600 mt-1">Used for boundary verification (step 3d)</p>
             </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Correction Mode</label>
+              <select id="set-correction-mode"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="v1">V1 — Multi-agent (verify → correct → verify)</option>
+                <option value="v2">V2 — Single-agent (verify + correct in one call)</option>
+              </select>
+              <p class="text-xs text-gray-600 mt-1">V2 saves 1 API call per retry and eliminates handoff loss</p>
+            </div>
           </div>
         </div>
 
@@ -394,6 +403,16 @@
             <textarea id="set-verification-prompt" rows="6"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
             <p class="text-xs text-gray-600 mt-1">Sent with the annotated image (red rectangle) to verify AI-detected boundaries (step 3). Supports {name} placeholder.</p>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-sm text-gray-300">Verification-Correction Prompt <span class="text-gray-600">(V2 only)</span></label>
+              <button type="button" onclick="resetPrompt('verification_correction')"
+                class="text-xs text-gray-500 hover:text-gray-300 active:scale-95 transition">Reset to default</button>
+            </div>
+            <textarea id="set-verification-correction-prompt" rows="6"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
+            <p class="text-xs text-gray-600 mt-1">V2 task instructions: tells the model to both verify AND provide corrected coordinates when rejecting. Inserted between boundary_prompt and image context.</p>
           </div>
         </div>
 
@@ -1119,6 +1138,8 @@ async function loadSettings() {
     document.getElementById('set-validation-prompt').value = s.validation_prompt || '';
     document.getElementById('set-boundary-prompt').value = s.boundary_prompt || '';
     document.getElementById('set-verification-prompt').value = s.verification_prompt || '';
+    document.getElementById('set-correction-mode').value = s.correction_mode || 'v1';
+    document.getElementById('set-verification-correction-prompt').value = s.verification_correction_prompt || '';
   } catch {}
 }
 
@@ -1158,6 +1179,10 @@ async function saveSettings(e) {
   if (bp) body.boundary_prompt = bp;
   const vfp = document.getElementById('set-verification-prompt').value.trim();
   if (vfp) body.verification_prompt = vfp;
+  const cm = document.getElementById('set-correction-mode').value.trim();
+  if (cm) body.correction_mode = cm;
+  const vcp = document.getElementById('set-verification-correction-prompt').value.trim();
+  if (vcp) body.verification_correction_prompt = vcp;
 
   if (Object.keys(body).length === 0) {
     toast('No changes to save', 'error');
