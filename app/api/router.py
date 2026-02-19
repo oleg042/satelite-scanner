@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import urllib.parse
 
@@ -109,6 +110,8 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         boundary_prompt=settings_dict.get("boundary_prompt", ""),
         verification_prompt=settings_dict.get("verification_prompt", ""),
         verification_model=settings_dict.get("verification_model", ""),
+        correction_mode=settings_dict.get("correction_mode", ""),
+        verification_correction_prompt=settings_dict.get("verification_correction_prompt", ""),
     )
 
 
@@ -127,6 +130,47 @@ async def update_settings(req: SettingsUpdate, db: AsyncSession = Depends(get_db
 
     await db.commit()
     return await get_settings(db)
+
+
+# --- Storage diagnostics ---
+
+def _dir_stats(path: str) -> tuple[float, int]:
+    """Walk a directory and return (total_bytes, file_count)."""
+    total = 0
+    count = 0
+    if not os.path.isdir(path):
+        return total, count
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, f))
+                count += 1
+            except OSError:
+                pass
+    return total, count
+
+
+@api_router.get("/storage")
+async def get_storage():
+    """Return volume storage breakdown in MB."""
+    volume = app_settings.volume_path
+
+    tile_bytes, tile_files = _dir_stats(os.path.join(volume, "tile_cache"))
+    ss_bytes, ss_files = _dir_stats(os.path.join(volume, "screenshots"))
+
+    # Total volume usage
+    total_bytes, _ = _dir_stats(volume)
+    other_bytes = total_bytes - tile_bytes - ss_bytes
+
+    to_mb = lambda b: round(b / (1024 * 1024), 1)
+    return {
+        "total_mb": to_mb(total_bytes),
+        "tile_cache_mb": to_mb(tile_bytes),
+        "tile_cache_files": tile_files,
+        "screenshots_mb": to_mb(ss_bytes),
+        "screenshots_files": ss_files,
+        "other_mb": to_mb(other_bytes),
+    }
 
 
 # --- Geocoder proxies (avoids CORS, sets proper User-Agent) ---

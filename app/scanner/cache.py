@@ -1,6 +1,7 @@
 """Disk-based tile cache for Railway Volume storage."""
 
 import os
+import shutil
 from typing import Optional
 
 from app.config import settings
@@ -35,3 +36,7 @@ class TileCache:
                 f.write(data)
         except OSError:
             pass
+
+    def clear(self) -> None:
+        """Remove the entire cache directory tree."""
+        shutil.rmtree(self.base_dir, ignore_errors=True)
