@@ -899,6 +899,12 @@ function renderDetail(scan) {
             html += `<div class="border-t border-gray-800 mt-1 pt-1">`;
             html += `<div>Rejection reason: ${esc(rv.reason || '-')}</div>`;
             html += `<div>Issues: ${esc(rv.issues || '-')}</div>`;
+            if (rv.edge_feedback) {
+              html += `<div class="mt-1 text-gray-500">Per-edge feedback:</div>`;
+              Object.entries(rv.edge_feedback).forEach(([edge, fb]) => {
+                html += `<div class="ml-2">• ${esc(edge.toUpperCase())}: ${esc(String(fb))}</div>`;
+              });
+            }
             if (rv.tokens) html += `<div>Verification tokens: ${(rv.tokens.total || 0).toLocaleString()}</div>`;
             html += '</div>';
             html += '</div></details>';
