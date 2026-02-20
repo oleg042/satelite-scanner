@@ -2,10 +2,11 @@
 
 Flow:
   1. OSM CHECK → find building footprint
-  2. AI VALIDATION → verify OSM bbox is complete
-  3. AI VISION FALLBACK → detect boundary from scratch
-  4. TILING → capture high-res imagery
-  5. DONE
+  2. MSFT BUILDINGS FALLBACK → query Microsoft footprints if OSM missed
+  3. AI VALIDATION → verify bbox is complete
+  4. AI VISION FALLBACK → detect boundary from scratch
+  5. TILING → capture high-res imagery
+  6. DONE
 """
 
 import asyncio
@@ -29,6 +30,10 @@ from app.scanner.geo import (
     bbox_dimensions_m,
     meters_per_deg_lng,
     pixel_to_latlng,
+)
+from app.scanner.msft import (
+    find_target_building as find_target_building_msft,
+    query_msft_buildings,
 )
 from app.scanner.osm import (
     find_target_building,
@@ -85,6 +90,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     verification_model = await _get_setting(db, "verification_model", "gpt-5.2")
     correction_mode = await _get_setting(db, "correction_mode", "v1")
     verification_correction_prompt = await _get_setting(db, "verification_correction_prompt", "")
+    enable_msft_fallback = await _get_setting(db, "enable_msft_fallback", "true")
 
     return {
         "api_key": api_key,
@@ -99,6 +105,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "verification_prompt": verification_prompt,
         "correction_mode": correction_mode,
         "verification_correction_prompt": verification_correction_prompt,
+        "enable_msft_fallback": enable_msft_fallback == "true",
     }
 
 
@@ -342,7 +349,55 @@ async def run_pipeline(scan_id, db: AsyncSession):
             decision=osm_decision,
         )
 
-        # ── STEP 2: AI VALIDATION (if OSM found something) ────────
+        # ── STEP 2: MICROSOFT BUILDINGS FALLBACK ──────────────────
+        if osm_bbox is None and config.get("enable_msft_fallback"):
+            step_num += 1
+            scan.status = ScanStatus.running_msft
+            await db.commit()
+
+            msft_start = time.monotonic()
+            msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
+            msft_decision = None
+            msft_building_info = None
+
+            if msft_buildings:
+                building = find_target_building_msft(msft_buildings, lat, lng)
+                if building:
+                    lats = [c[0] for c in building["coords"]]
+                    lngs = [c[1] for c in building["coords"]]
+                    raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
+                    osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                    method = ScanMethod.msft_buildings
+                    msft_building_info = {
+                        "coord_count": len(building["coords"]),
+                        "raw_bbox": list(raw_bbox),
+                        "buffered_bbox": list(osm_bbox),
+                    }
+                    msft_decision = f"Found target building among {len(msft_buildings)} MSFT buildings. Applied {buffer_m}m buffer."
+                else:
+                    msft_decision = f"Found {len(msft_buildings)} MSFT buildings but none matched target coordinates."
+            else:
+                msft_decision = "No MSFT buildings found (no data for region or query failed)."
+
+            msft_elapsed = int((time.monotonic() - msft_start) * 1000)
+            await _record_step(
+                db, scan_id, step_num, "msft_buildings_check",
+                status="completed",
+                duration_ms=msft_elapsed,
+                input_summary=json.dumps({
+                    "lat": lat,
+                    "lng": lng,
+                    "search_radius_m": settings.search_radius_m,
+                }),
+                output_summary=json.dumps({
+                    "buildings_found": len(msft_buildings),
+                    "target": msft_building_info,
+                    "bbox": list(osm_bbox) if osm_bbox else None,
+                }),
+                decision=msft_decision,
+            )
+
+        # ── STEP 3: AI VALIDATION (if OSM or MSFT found something) ─
         if osm_bbox and config["api_key"]:
             step_num += 1
             scan.status = ScanStatus.running_validate
@@ -451,7 +506,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 duration_ms=0,
             )
 
-        # ── STEP 3: AI VISION FALLBACK ─────────────────────────────
+        # ── STEP 4: AI VISION FALLBACK ─────────────────────────────
         if final_bbox is None and config["api_key"]:
             step_num += 1
             scan.status = ScanStatus.running_vision
@@ -870,27 +925,9 @@ async def run_pipeline(scan_id, db: AsyncSession):
             scan.ai_duration_ms = (scan.ai_duration_ms or 0) + ai_elapsed
             await db.commit()
 
-        # ── FALLBACK: radius around point ──────────────────────────
+        # ── FAIL if no boundary found ─────────────────────────────
         if final_bbox is None:
-            step_num += 1
-            final_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.fallback_radius_m)
-            method = ScanMethod.fallback_radius
-            logger.info("Using fallback radius of %dm", settings.fallback_radius_m)
-
-            await _record_step(
-                db, scan_id, step_num, "fallback",
-                status="completed",
-                duration_ms=0,
-                input_summary=json.dumps({
-                    "lat": lat,
-                    "lng": lng,
-                    "fallback_radius_m": settings.fallback_radius_m,
-                }),
-                output_summary=json.dumps({
-                    "bbox": list(final_bbox),
-                }),
-                decision=f"No boundary found by OSM or AI. Using {settings.fallback_radius_m}m radius fallback.",
-            )
+            raise RuntimeError("No building boundary found by OSM, MSFT, or AI Vision.")
 
         # Record bbox
         scan.method = method
@@ -901,7 +938,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
         scan.bbox_height_m = height_m
         await db.commit()
 
-        # ── STEP 4: TILING ─────────────────────────────────────────
+        # ── STEP 5: TILING ─────────────────────────────────────────
         step_num += 1
         scan.status = ScanStatus.running_tiling
         await db.commit()
@@ -978,7 +1015,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
             tile_grid_rows=grid_rows if grid_info else None,
         )
 
-        # ── STEP 5: DONE ──────────────────────────────────────────
+        # ── STEP 6: DONE ──────────────────────────────────────────
         step_num += 1
         scan.status = ScanStatus.completed
         scan.completed_at = datetime.now(timezone.utc)

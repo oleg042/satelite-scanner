@@ -31,6 +31,7 @@ class ScanStatus(str, enum.Enum):
     running_osm = "running_osm"
     running_validate = "running_validate"
     running_vision = "running_vision"
+    running_msft = "running_msft"
     running_tiling = "running_tiling"
     completed = "completed"
     failed = "failed"
@@ -41,7 +42,7 @@ class ScanMethod(str, enum.Enum):
     osm_building = "osm_building"
     osm_landuse = "osm_landuse"
     ai_vision = "ai_vision"
-    fallback_radius = "fallback_radius"
+    msft_buildings = "msft_buildings"
     skipped = "skipped"
 
 

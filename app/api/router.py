@@ -113,6 +113,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         verification_model=settings_dict.get("verification_model", ""),
         correction_mode=settings_dict.get("correction_mode", ""),
         verification_correction_prompt=settings_dict.get("verification_correction_prompt", ""),
+        enable_msft_fallback=settings_dict.get("enable_msft_fallback", ""),
     )
 
 

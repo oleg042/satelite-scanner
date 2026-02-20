@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     "validation_prompt": "",
     "boundary_prompt": "",
     "verification_prompt": "",
+    "enable_msft_fallback": "true",
 }
 
 
@@ -47,6 +48,12 @@ async def _init_db():
         await conn.execution_options(isolation_level="AUTOCOMMIT")
         await conn.execute(text(
             "ALTER TYPE scan_status ADD VALUE IF NOT EXISTS 'pending' BEFORE 'queued'"
+        ))
+        await conn.execute(text(
+            "ALTER TYPE scan_status ADD VALUE IF NOT EXISTS 'running_msft'"
+        ))
+        await conn.execute(text(
+            "ALTER TYPE scan_method ADD VALUE IF NOT EXISTS 'msft_buildings'"
         ))
         await conn.close()
     except Exception as e:
