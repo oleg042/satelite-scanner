@@ -1,8 +1,8 @@
 """Waterfall pipeline orchestrator with full step-by-step tracing.
 
 Flow:
-  1. OSM CHECK → find building footprint
-  2. MSFT BUILDINGS FALLBACK → query Microsoft footprints if OSM missed
+  1. MSFT BUILDINGS CHECK → query Microsoft footprints (1.4B buildings)
+  2. OSM FALLBACK → query OpenStreetMap if MSFT missed
   3. AI VALIDATION → verify bbox is complete
   4. AI VISION FALLBACK → detect boundary from scratch
   5. TILING → capture high-res imagery
@@ -285,72 +285,15 @@ async def run_pipeline(scan_id, db: AsyncSession):
     buffer_m = config["buffer_m"]
     overview_zoom = config["overview_zoom"]
 
-    # Will be set by OSM or AI vision
+    # Will be set by MSFT, OSM, or AI vision
     final_bbox = None
     method = None
     step_num = 0
+    osm_bbox = None  # shared variable — set by MSFT or OSM, consumed by AI validation
 
     try:
-        # ── STEP 1: OSM CHECK ──────────────────────────────────────
-        step_num += 1
-        scan.status = ScanStatus.running_osm
-        await db.commit()
-
-        osm_start = time.monotonic()
-        buildings = await query_osm_buildings(lat, lng, settings.search_radius_m)
-        scan.osm_building_count = len(buildings)
-
-        osm_bbox = None
-        osm_decision = None
-        osm_building_info = None
-
-        if buildings:
-            building = find_target_building(buildings, lat, lng)
-            if building:
-                scan.osm_building_id = building["id"]
-                lats = [c[0] for c in building["coords"]]
-                lngs = [c[1] for c in building["coords"]]
-                raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
-                osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
-                method = ScanMethod.osm_building
-                osm_building_info = {
-                    "osm_id": building["id"],
-                    "raw_bbox": list(raw_bbox),
-                    "buffered_bbox": list(osm_bbox),
-                    "coord_count": len(building["coords"]),
-                }
-                osm_decision = f"Found target building OSM #{building['id']} among {len(buildings)} buildings. Applied {buffer_m}m buffer."
-            else:
-                osm_decision = f"Found {len(buildings)} buildings but none matched target coordinates."
-        else:
-            osm_decision = "No buildings found within search radius."
-
-        osm_elapsed = int((time.monotonic() - osm_start) * 1000)
-        scan.osm_duration_ms = osm_elapsed
-        await db.commit()
-
-        await _record_step(
-            db, scan_id, step_num, "osm_check",
-            status="completed",
-            started_at=scan.started_at,
-            completed_at=datetime.now(timezone.utc),
-            duration_ms=osm_elapsed,
-            input_summary=json.dumps({
-                "facility_name": facility_name,
-                "lat": lat,
-                "lng": lng,
-                "search_radius_m": settings.search_radius_m,
-            }),
-            output_summary=json.dumps({
-                "buildings_found": len(buildings),
-                "target_building": osm_building_info,
-                "bbox": list(osm_bbox) if osm_bbox else None,
-            }),
-            decision=osm_decision,
-        )
-
-        # ── STEP 2: MICROSOFT BUILDINGS FALLBACK ──────────────────
-        if osm_bbox is None and config.get("enable_msft_fallback"):
+        # ── STEP 1: MICROSOFT BUILDINGS CHECK ─────────────────────
+        if config.get("enable_msft_fallback"):
             step_num += 1
             scan.status = ScanStatus.running_msft
             await db.commit()
@@ -397,7 +340,65 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 decision=msft_decision,
             )
 
-        # ── STEP 3: AI VALIDATION (if OSM or MSFT found something) ─
+        # ── STEP 2: OSM FALLBACK (if MSFT missed) ────────────────
+        if osm_bbox is None:
+            step_num += 1
+            scan.status = ScanStatus.running_osm
+            await db.commit()
+
+            osm_start = time.monotonic()
+            buildings = await query_osm_buildings(lat, lng, settings.search_radius_m)
+            scan.osm_building_count = len(buildings)
+
+            osm_decision = None
+            osm_building_info = None
+
+            if buildings:
+                building = find_target_building(buildings, lat, lng)
+                if building:
+                    scan.osm_building_id = building["id"]
+                    lats = [c[0] for c in building["coords"]]
+                    lngs = [c[1] for c in building["coords"]]
+                    raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
+                    osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                    method = ScanMethod.osm_building
+                    osm_building_info = {
+                        "osm_id": building["id"],
+                        "raw_bbox": list(raw_bbox),
+                        "buffered_bbox": list(osm_bbox),
+                        "coord_count": len(building["coords"]),
+                    }
+                    osm_decision = f"Found target building OSM #{building['id']} among {len(buildings)} buildings. Applied {buffer_m}m buffer."
+                else:
+                    osm_decision = f"Found {len(buildings)} buildings but none matched target coordinates."
+            else:
+                osm_decision = "No buildings found within search radius."
+
+            osm_elapsed = int((time.monotonic() - osm_start) * 1000)
+            scan.osm_duration_ms = osm_elapsed
+            await db.commit()
+
+            await _record_step(
+                db, scan_id, step_num, "osm_check",
+                status="completed",
+                started_at=scan.started_at,
+                completed_at=datetime.now(timezone.utc),
+                duration_ms=osm_elapsed,
+                input_summary=json.dumps({
+                    "facility_name": facility_name,
+                    "lat": lat,
+                    "lng": lng,
+                    "search_radius_m": settings.search_radius_m,
+                }),
+                output_summary=json.dumps({
+                    "buildings_found": len(buildings),
+                    "target_building": osm_building_info,
+                    "bbox": list(osm_bbox) if osm_bbox else None,
+                }),
+                decision=osm_decision,
+            )
+
+        # ── STEP 3: AI VALIDATION (if MSFT or OSM found something) ─
         if osm_bbox and config["api_key"]:
             step_num += 1
             scan.status = ScanStatus.running_validate

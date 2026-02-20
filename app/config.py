@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     stale_scan_timeout_minutes: int = 30
     search_radius_m: int = 200
     fallback_radius_m: int = 75
-    overview_radius_m: int = 400
+    overview_radius_m: int = 200
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

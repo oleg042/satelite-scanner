@@ -209,6 +209,7 @@ def detect_facility_boundary(
         response = client.chat.completions.create(
             model=model,
             max_completion_tokens=8192,
+            reasoning_effort="high",
             messages=[{
                 "role": "user",
                 "content": [
