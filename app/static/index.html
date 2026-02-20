@@ -335,15 +335,6 @@
               <p class="text-xs text-gray-600 mt-1">Used for boundary verification (step 3d)</p>
             </div>
             <div>
-              <label class="block text-sm text-gray-300 mb-1.5">Microsoft Buildings Fallback</label>
-              <select id="set-enable-msft-fallback"
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-                <option value="true">Enabled — Query MSFT when OSM misses</option>
-                <option value="false">Disabled — Skip straight to AI Vision</option>
-              </select>
-              <p class="text-xs text-gray-600 mt-1">Free fallback: 1.4B building footprints, 4–24s per query</p>
-            </div>
-            <div>
               <label class="block text-sm text-gray-300 mb-1.5">Correction Mode</label>
               <select id="set-correction-mode"
                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
@@ -1154,7 +1145,6 @@ async function loadSettings() {
     document.getElementById('set-boundary-prompt').value = s.boundary_prompt || '';
     document.getElementById('set-verification-prompt').value = s.verification_prompt || '';
     document.getElementById('set-correction-mode').value = s.correction_mode || 'v1';
-    document.getElementById('set-enable-msft-fallback').value = s.enable_msft_fallback || 'true';
     document.getElementById('set-verification-correction-prompt').value = s.verification_correction_prompt || '';
   } catch {}
 }
@@ -1197,8 +1187,6 @@ async function saveSettings(e) {
   if (vfp) body.verification_prompt = vfp;
   const cm = document.getElementById('set-correction-mode').value.trim();
   if (cm) body.correction_mode = cm;
-  const emf = document.getElementById('set-enable-msft-fallback').value.trim();
-  if (emf) body.enable_msft_fallback = emf;
   const vcp = document.getElementById('set-verification-correction-prompt').value.trim();
   if (vcp) body.verification_correction_prompt = vcp;
 

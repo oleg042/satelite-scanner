@@ -36,7 +36,6 @@ DEFAULT_SETTINGS = {
     "validation_prompt": "",
     "boundary_prompt": "",
     "verification_prompt": "",
-    "enable_msft_fallback": "true",
 }
 
 

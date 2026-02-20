@@ -48,7 +48,6 @@ class SettingsUpdate(BaseModel):
     verification_model: Optional[str] = None
     correction_mode: Optional[str] = None
     verification_correction_prompt: Optional[str] = None
-    enable_msft_fallback: Optional[str] = None
 
 
 # --- Responses ---
@@ -124,7 +123,6 @@ class SettingsResponse(BaseModel):
     verification_model: str = ""
     correction_mode: str = ""
     verification_correction_prompt: str = ""
-    enable_msft_fallback: str = ""
 
 
 class ScanStepResponse(BaseModel):

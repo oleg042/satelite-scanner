@@ -90,8 +90,6 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     verification_model = await _get_setting(db, "verification_model", "gpt-5.2")
     correction_mode = await _get_setting(db, "correction_mode", "v1")
     verification_correction_prompt = await _get_setting(db, "verification_correction_prompt", "")
-    enable_msft_fallback = await _get_setting(db, "enable_msft_fallback", "true")
-
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -105,7 +103,6 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "verification_prompt": verification_prompt,
         "correction_mode": correction_mode,
         "verification_correction_prompt": verification_correction_prompt,
-        "enable_msft_fallback": enable_msft_fallback == "true",
     }
 
 
@@ -293,52 +290,51 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
     try:
         # ── STEP 1: MICROSOFT BUILDINGS CHECK ─────────────────────
-        if config.get("enable_msft_fallback"):
-            step_num += 1
-            scan.status = ScanStatus.running_msft
-            await db.commit()
+        step_num += 1
+        scan.status = ScanStatus.running_msft
+        await db.commit()
 
-            msft_start = time.monotonic()
-            msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
-            msft_decision = None
-            msft_building_info = None
+        msft_start = time.monotonic()
+        msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
+        msft_decision = None
+        msft_building_info = None
 
-            if msft_buildings:
-                building = find_target_building_msft(msft_buildings, lat, lng)
-                if building:
-                    lats = [c[0] for c in building["coords"]]
-                    lngs = [c[1] for c in building["coords"]]
-                    raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
-                    osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
-                    method = ScanMethod.msft_buildings
-                    msft_building_info = {
-                        "coord_count": len(building["coords"]),
-                        "raw_bbox": list(raw_bbox),
-                        "buffered_bbox": list(osm_bbox),
-                    }
-                    msft_decision = f"Found target building among {len(msft_buildings)} MSFT buildings. Applied {buffer_m}m buffer."
-                else:
-                    msft_decision = f"Found {len(msft_buildings)} MSFT buildings but none matched target coordinates."
+        if msft_buildings:
+            building = find_target_building_msft(msft_buildings, lat, lng)
+            if building:
+                lats = [c[0] for c in building["coords"]]
+                lngs = [c[1] for c in building["coords"]]
+                raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
+                osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                method = ScanMethod.msft_buildings
+                msft_building_info = {
+                    "coord_count": len(building["coords"]),
+                    "raw_bbox": list(raw_bbox),
+                    "buffered_bbox": list(osm_bbox),
+                }
+                msft_decision = f"Found target building among {len(msft_buildings)} MSFT buildings. Applied {buffer_m}m buffer."
             else:
-                msft_decision = "No MSFT buildings found (no data for region or query failed)."
+                msft_decision = f"Found {len(msft_buildings)} MSFT buildings but none matched target coordinates."
+        else:
+            msft_decision = "No MSFT buildings found (no data for region or query failed)."
 
-            msft_elapsed = int((time.monotonic() - msft_start) * 1000)
-            await _record_step(
-                db, scan_id, step_num, "msft_buildings_check",
-                status="completed",
-                duration_ms=msft_elapsed,
-                input_summary=json.dumps({
-                    "lat": lat,
-                    "lng": lng,
-                    "search_radius_m": settings.search_radius_m,
-                }),
-                output_summary=json.dumps({
-                    "buildings_found": len(msft_buildings),
-                    "target": msft_building_info,
-                    "bbox": list(osm_bbox) if osm_bbox else None,
-                }),
-                decision=msft_decision,
-            )
+        msft_elapsed = int((time.monotonic() - msft_start) * 1000)
+        await _record_step(
+            db, scan_id, step_num, "msft_buildings_check",
+            status="completed",
+            duration_ms=msft_elapsed,
+            input_summary=json.dumps({
+                "lat": lat,
+                "lng": lng,
+                "search_radius_m": settings.search_radius_m,
+            }),
+            output_summary=json.dumps({
+                "buildings_found": len(msft_buildings),
+                "target": msft_building_info,
+                "bbox": list(osm_bbox) if osm_bbox else None,
+            }),
+            decision=msft_decision,
+        )
 
         # ── STEP 2: OSM FALLBACK (if MSFT missed) ────────────────
         if osm_bbox is None:
