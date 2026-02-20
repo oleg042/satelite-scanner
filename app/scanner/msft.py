@@ -181,53 +181,90 @@ def _building_area(b: dict, ref_lat: float) -> float:
     )
 
 
+_MERGE_GAP_M = 15
+
+
+def _bbox_gap_m(a: dict, b: dict, ref_lat: float) -> float:
+    """Minimum gap (m) between two buildings' bounding boxes. 0 if they overlap."""
+    a_lats = [c[0] for c in a["coords"]]
+    a_lngs = [c[1] for c in a["coords"]]
+    b_lats = [c[0] for c in b["coords"]]
+    b_lngs = [c[1] for c in b["coords"]]
+
+    lat_gap = max(0, max(min(a_lats), min(b_lats)) - min(max(a_lats), max(b_lats)))
+    lng_gap = max(0, max(min(a_lngs), min(b_lngs)) - min(max(a_lngs), max(b_lngs)))
+
+    return math.sqrt((lat_gap * M_PER_DEG_LAT) ** 2 + (lng_gap * meters_per_deg_lng(ref_lat)) ** 2)
+
+
+def _merge_adjacent(seed: dict, all_buildings: list[dict], ref_lat: float) -> dict:
+    """Flood-fill merge: starting from seed, absorb buildings within _MERGE_GAP_M."""
+    merged_ids = {seed["id"]}
+    merged_coords = list(seed["coords"])
+    cluster = [seed]
+
+    changed = True
+    while changed:
+        changed = False
+        for b in all_buildings:
+            if b["id"] in merged_ids:
+                continue
+            for m in cluster:
+                if _bbox_gap_m(m, b, ref_lat) <= _MERGE_GAP_M:
+                    merged_ids.add(b["id"])
+                    merged_coords.extend(b["coords"])
+                    cluster.append(b)
+                    changed = True
+                    break
+
+    if len(merged_ids) > 1:
+        logger.info("MSFT: merged %d adjacent polygons (ids: %s)", len(merged_ids), list(merged_ids))
+
+    return {
+        "id": seed["id"],
+        "tags": seed.get("tags", {}),
+        "coords": merged_coords,
+    }
+
+
 def find_target_building(
     buildings: list[dict], target_lat: float, target_lng: float
 ) -> dict | None:
-    """Find the facility's building(s) near the target point.
+    """Find the facility's building near the target point.
 
-    Collects ALL buildings within _MAX_EDGE_DISTANCE_M of the pin, then
-    merges them into one combined polygon. This handles cases where MSFT
-    splits a single large building into multiple polygons with gaps, and
-    cases where the pin falls between two sections of the same complex.
+    Seed selection:
+    - If pin is inside a building → use it
+    - If not → use the LARGEST building within range (not nearest — the
+      main building is what the user is pointing at)
+
+    Then flood-fill merge adjacent polygons within 15m gap to capture
+    connected sections (loading docks, walkways, split polygons).
     """
-    # Collect all buildings within range of the pin
-    nearby = []
+    seed = None
+
+    # Check if pin is inside any building
     for b in buildings:
-        # Pin inside counts as distance 0
         if point_in_polygon(target_lat, target_lng, b["coords"]):
-            nearby.append((b, 0.0))
-        else:
+            area = _building_area(b, target_lat)
+            logger.info("MSFT: target inside building %d (~%.0f m²)", b["id"], area)
+            seed = b
+            break
+
+    # Pin not inside any building — pick the largest within range
+    if seed is None:
+        candidates = []
+        for b in buildings:
             dist = _building_edge_distance(b, target_lat, target_lng)
             if dist <= _MAX_EDGE_DISTANCE_M:
-                nearby.append((b, dist))
+                area = _building_area(b, target_lat)
+                candidates.append((b, dist, area))
 
-    if not nearby:
-        return None
+        if not candidates:
+            return None
 
-    nearby.sort(key=lambda x: x[1])
-    primary = nearby[0][0]
-    primary_dist = nearby[0][1]
+        # Sort by area descending — pick the biggest
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        seed, seed_dist, seed_area = candidates[0]
+        logger.info("MSFT: selected largest building %d (~%.0f m², %.0fm from pin)", seed["id"], seed_area, seed_dist)
 
-    if primary_dist == 0.0:
-        logger.info("MSFT: target inside building %d (~%.0f m²)", primary["id"], _building_area(primary, target_lat))
-    else:
-        logger.info("MSFT: nearest building %d (~%.0f m², %.0fm from pin)", primary["id"], _building_area(primary, target_lat), primary_dist)
-
-    # Merge all nearby buildings into one combined polygon
-    if len(nearby) == 1:
-        return primary
-
-    merged_coords = []
-    merged_ids = []
-    for b, dist in nearby:
-        merged_coords.extend(b["coords"])
-        merged_ids.append(b["id"])
-
-    logger.info("MSFT: merged %d buildings within %dm of pin (ids: %s)", len(nearby), _MAX_EDGE_DISTANCE_M, merged_ids)
-
-    return {
-        "id": primary["id"],
-        "tags": primary.get("tags", {}),
-        "coords": merged_coords,
-    }
+    return _merge_adjacent(seed, buildings, target_lat)
