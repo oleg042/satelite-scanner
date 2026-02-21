@@ -1320,13 +1320,12 @@ function renderDetail(scan) {
           });
         }
 
-        // Notes (near-misses)
-        if (crNotes.length > 0) {
+        // Analysis / notes
+        const notesStr = Array.isArray(crNotes) ? crNotes.join(' ') : (typeof crNotes === 'string' ? crNotes : '');
+        if (notesStr.trim()) {
           html += `<div class="border-t border-gray-800 pt-1 mt-1">`;
-          html += `<div class="text-gray-500 font-medium">Notes (near-misses):</div>`;
-          crNotes.forEach(n => {
-            html += `<div class="ml-2 text-gray-400">• ${esc(typeof n === 'string' ? n : JSON.stringify(n))}</div>`;
-          });
+          html += `<div class="text-gray-500 font-medium">Analysis:</div>`;
+          html += `<div class="ml-2 text-gray-400">${esc(notesStr)}</div>`;
           html += `</div>`;
         }
 
@@ -1346,10 +1345,11 @@ function renderDetail(scan) {
 
       // Aggregated notes across all chunks
       const allNotes = binOut.notes || [];
-      if (allNotes.length > 0) {
+      const allNotesArr = Array.isArray(allNotes) ? allNotes : (typeof allNotes === 'string' && allNotes.trim() ? [allNotes] : []);
+      if (allNotesArr.length > 0) {
         html += `<div class="bg-gray-900 rounded px-3 py-2 text-sm">`;
         html += `<div class="text-gray-500 font-medium text-xs">All Notes:</div>`;
-        allNotes.forEach(n => {
+        allNotesArr.forEach(n => {
           html += `<div class="text-gray-400 text-xs ml-2">${esc(typeof n === 'string' ? n : JSON.stringify(n))}</div>`;
         });
         html += `</div>`;
