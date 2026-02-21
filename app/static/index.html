@@ -1051,7 +1051,13 @@ function renderDetail(scan) {
         }
       }
 
-      const label = `${ss.type} (z${ss.zoom || '?'})${sizeStr}`;
+      // For bin_chunk screenshots, extract col/row from filename (e.g. bin_chunk_0_1)
+      let typeLabel = ss.type;
+      if (ss.type === 'bin_chunk' && ss.filename) {
+        const m = ss.filename.match(/bin_chunk_(\d+)_(\d+)/);
+        if (m) typeLabel = `bin_chunk c${m[1]}r${m[2]}`;
+      }
+      const label = `${typeLabel} (z${ss.zoom || '?'})${sizeStr}`;
       const overlayArg = overlayData ? JSON.stringify(overlayData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
       const msftArg = msftData ? JSON.stringify(msftData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
 
@@ -1072,15 +1078,15 @@ function renderDetail(scan) {
         if (msftData) badges += ' <span class="text-green-400">■</span> target <span class="text-blue-400">■</span> context';
         html += `<div class="text-center">
           <div class="relative inline-block bbox-overlay-container cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', ${overlayArg}, ${msftArg})" title="Click to enlarge">
-              <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
+              <img src="${thumbSrc}" alt="${esc(typeLabel)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
                 onload="${onloadCalls}">
           </div>
-          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}${badges ? '<br>' + badges : ''}</div>
+          <div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}${badges ? '<br>' + badges : ''}</div>
         </div>`;
       } else {
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null, null)" title="Click to enlarge">
-            <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
+            <img src="${thumbSrc}" alt="${esc(typeLabel)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
+          <div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}</div>
         </div>`;
       }
     });
