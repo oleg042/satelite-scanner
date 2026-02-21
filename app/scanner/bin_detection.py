@@ -320,7 +320,9 @@ async def run_bin_detection(
         parsed = result["parsed"]
         chunk_bin_present = parsed.get("bin_present", False)
         chunk_bins = parsed.get("bins", [])
-        chunk_confidence = parsed.get("overall_confidence", 0)
+        # Derive chunk confidence from per-bin confidences (model has no top-level field)
+        bin_confs = [b.get("confidence", 0) for b in chunk_bins if b.get("confidence")]
+        chunk_confidence = min(bin_confs) if bin_confs else 0
 
         chunk_result = {
             "col": chunk["col"], "row": chunk["row"],

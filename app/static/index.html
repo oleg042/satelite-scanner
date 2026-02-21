@@ -1254,7 +1254,11 @@ function renderDetail(scan) {
       html += `<div class="flex items-center gap-3 flex-wrap">`;
       html += `<span class="text-gray-300">Grid: <span class="text-gray-100 font-medium">${esc(gridLabel)}</span> = ${chunkCount} chunks (${esc(String(maxChunkM))}m)</span>`;
       html += `<span class="text-gray-500">|</span>`;
-      html += `<span class="text-gray-300">${totalBins} bin${totalBins !== 1 ? 's' : ''} detected</span>`;
+      if (totalBins > 0) {
+        html += `<span class="text-green-400 font-medium">&#10003; ${totalBins} bin${totalBins !== 1 ? 's' : ''} detected</span>`;
+      } else {
+        html += `<span class="text-gray-500">0 bins detected</span>`;
+      }
       html += `<span class="text-gray-500">|</span>`;
       html += `<span class="text-gray-300">${binTokensTotal.toLocaleString()} tokens</span>`;
       html += `<span class="text-gray-500">|</span>`;
@@ -1265,9 +1269,11 @@ function renderDetail(scan) {
       html += `<span class="${bdsColor}">${esc(bds || 'unknown')}</span>`;
       html += '</div>';
       if (scan.bin_present) {
-        html += `<div class="mt-1 text-gray-400">${scan.bin_count} bin${scan.bin_count !== 1 ? 's' : ''}`;
-        html += ` (${scan.bin_filled_count || 0} filled, ${scan.bin_empty_count || 0} empty)`;
-        html += ` — confidence: ${scan.bin_confidence}%</div>`;
+        html += `<div class="mt-1 flex items-center gap-4 flex-wrap">`;
+        html += `<span class="text-yellow-400">Filled: <span class="font-medium">${scan.bin_filled_count || 0}</span></span>`;
+        html += `<span class="text-gray-400">Empty: <span class="font-medium">${scan.bin_empty_count || 0}</span></span>`;
+        html += `<span class="text-gray-300">Confidence: <span class="font-medium">${scan.bin_confidence}%</span></span>`;
+        html += `</div>`;
       } else if (bds) {
         html += '<div class="mt-1 text-gray-500">No bins detected</div>';
       }
@@ -1352,11 +1358,25 @@ function renderDetail(scan) {
       // Aggregated notes across all chunks
       const allNotes = binOut.notes || [];
       const allNotesArr = Array.isArray(allNotes) ? allNotes : (typeof allNotes === 'string' && allNotes.trim() ? [allNotes] : []);
+      // Build set of chunk labels that found bins for green highlighting
+      const chunksWithBinsSet = new Set();
+      chunkResults.forEach(cr => {
+        if (cr.status === 'success' && cr.bin_present && (cr.total_bins || 0) > 0) {
+          chunksWithBinsSet.add(`c${cr.col}r${cr.row}`);
+        }
+      });
       if (allNotesArr.length > 0) {
         html += `<div class="bg-gray-900 rounded px-3 py-2 text-sm">`;
-        html += `<div class="text-gray-500 font-medium text-xs">All Notes:</div>`;
+        html += `<div class="text-gray-500 font-medium text-xs mb-2">All Notes:</div>`;
         allNotesArr.forEach(n => {
-          html += `<div class="text-gray-400 text-xs ml-2">${esc(typeof n === 'string' ? n : JSON.stringify(n))}</div>`;
+          const noteStr = typeof n === 'string' ? n : JSON.stringify(n);
+          // Check if this note's chunk found bins (extract [cXrY] prefix)
+          const chunkMatch = noteStr.match(/^\[c(\d+)r(\d+)\]/);
+          const chunkLabel = chunkMatch ? `c${chunkMatch[1]}r${chunkMatch[2]}` : null;
+          const hasBins = chunkLabel && chunksWithBinsSet.has(chunkLabel);
+          const noteColor = hasBins ? 'text-green-400' : 'text-gray-400';
+          const icon = hasBins ? '&#10003; ' : '';
+          html += `<div class="${noteColor} text-xs ml-2 mb-2">${icon}${esc(noteStr)}</div>`;
         });
         html += `</div>`;
       }
