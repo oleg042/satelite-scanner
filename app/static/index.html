@@ -363,22 +363,14 @@
         <!-- Building Footprint Provider -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Building Footprints</h3>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm text-gray-300 mb-1.5">Provider</label>
-              <select id="set-building-footprint-provider"
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-                <option value="msft">Microsoft Buildings (default)</option>
-                <option value="overture">Overture Maps (2.3B buildings)</option>
-              </select>
-              <p class="text-xs text-gray-600 mt-1">MSFT: 1.4B buildings, GeoJSONL. Overture: 2.3B, MSFT+Google+OSM merged.</p>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-300 mb-1.5">Overture Release</label>
-              <input id="set-overture-release" type="text" placeholder="2025-01-22.0"
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-              <p class="text-xs text-gray-600 mt-1">Only used when provider is Overture. Check overturemaps.org for releases.</p>
-            </div>
+          <div>
+            <label class="block text-sm text-gray-300 mb-1.5">Provider</label>
+            <select id="set-building-footprint-provider"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <option value="msft">Microsoft Buildings (default)</option>
+              <option value="overture">Overture Maps (2.3B buildings)</option>
+            </select>
+            <p class="text-xs text-gray-600 mt-1">MSFT: 1.4B buildings, GeoJSONL. Overture: 2.3B, MSFT+Google+OSM merged.</p>
           </div>
         </div>
 
@@ -1258,7 +1250,6 @@ async function loadSettings() {
     document.getElementById('set-verification-correction-prompt').value = s.verification_correction_prompt || '';
     document.getElementById('set-bbox-validation').checked = (s.bbox_validation_enabled || 'true') === 'true';
     document.getElementById('set-building-footprint-provider').value = s.building_footprint_provider || 'msft';
-    document.getElementById('set-overture-release').value = s.overture_release || '';
   } catch {}
 }
 
@@ -1305,8 +1296,6 @@ async function saveSettings(e) {
   body.bbox_validation_enabled = document.getElementById('set-bbox-validation').checked ? 'true' : 'false';
   const bfp = document.getElementById('set-building-footprint-provider').value.trim();
   if (bfp) body.building_footprint_provider = bfp;
-  const orel = document.getElementById('set-overture-release').value.trim();
-  if (orel) body.overture_release = orel;
 
   if (Object.keys(body).length === 0) {
     toast('No changes to save', 'error');
