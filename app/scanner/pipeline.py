@@ -94,7 +94,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     verification_correction_prompt = await _get_setting(db, "verification_correction_prompt", "")
     bbox_validation_enabled = (await _get_setting(db, "bbox_validation_enabled", "true")).lower() == "true"
     building_provider = await _get_setting(db, "building_footprint_provider", "msft")
-    overture_release = await _get_setting(db, "overture_release", "2025-01-22.0")
+    overture_release = await _get_setting(db, "overture_release", "2026-02-18.0")
     return {
         "api_key": api_key,
         "validation_model": validation_model,

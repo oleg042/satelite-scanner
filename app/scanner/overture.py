@@ -60,7 +60,7 @@ def _query_sync(lat: float, lng: float, search_radius_m: int, release: str) -> l
     try:
         result = con.execute(query, [s3_path, max_lng, min_lng, max_lat, min_lat]).fetchall()
     except Exception as e:
-        logger.warning("Overture DuckDB query failed: %s", e)
+        logger.error("Overture DuckDB query failed for S3 path '%s': %s", s3_path, e)
         return []
 
     buildings = []
@@ -117,7 +117,7 @@ def _query_sync(lat: float, lng: float, search_radius_m: int, release: str) -> l
 
 
 async def query_overture_buildings(
-    lat: float, lng: float, search_radius_m: int = 200, release: str = "2025-01-22.0"
+    lat: float, lng: float, search_radius_m: int = 200, release: str = "2026-02-18.0"
 ) -> list[dict]:
     """Query Overture Maps for buildings near coordinates.
 
