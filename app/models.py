@@ -50,6 +50,7 @@ class ScreenshotType(str, enum.Enum):
     overview = "overview"
     ai_overview = "ai_overview"
     final = "final"
+    msft_overlay = "msft_overlay"
 
 
 # --- Models ---
