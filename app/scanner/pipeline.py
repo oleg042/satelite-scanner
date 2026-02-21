@@ -1,12 +1,13 @@
 """Waterfall pipeline orchestrator with full step-by-step tracing.
 
 Flow:
-  1. OSM CHECK → query OpenStreetMap (fast, server-side spatial index)
-  2. MSFT/OVERTURE FALLBACK → query Microsoft/Overture if OSM missed
-  3. AI VALIDATION → verify bbox is complete
-  4. AI VISION FALLBACK → detect boundary from scratch
-  5. TILING → capture high-res imagery
-  6. DONE
+  1. MSFT CHECK → query Microsoft Buildings (fast API)
+  2. OSM FALLBACK → query OpenStreetMap if MSFT missed (pin-inside-polygon)
+  3. OVERTURE FALLBACK → query Overture Maps if both missed (broadest coverage)
+  4. AI VALIDATION → verify bbox is complete
+  5. AI VISION FALLBACK → detect boundary from scratch
+  6. TILING → capture high-res imagery
+  7. DONE
 """
 
 import asyncio
@@ -50,7 +51,14 @@ from app.scanner.vision import correct_facility_boundary, detect_facility_bounda
 
 logger = logging.getLogger(__name__)
 
-_heavy_semaphore = asyncio.Semaphore(settings.heavy_phase_concurrency)
+_heavy_semaphore: asyncio.Semaphore | None = None
+
+
+def init_heavy_semaphore(concurrency: int | None = None):
+    """Initialize the heavy-phase semaphore. Called once at startup from lifespan."""
+    global _heavy_semaphore
+    n = concurrency if concurrency is not None else settings.heavy_phase_concurrency
+    _heavy_semaphore = asyncio.Semaphore(n)
 
 
 def _is_fatal_ai_error(exc: Exception) -> bool:
@@ -95,8 +103,25 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     correction_mode = await _get_setting(db, "correction_mode", "v1")
     verification_correction_prompt = await _get_setting(db, "verification_correction_prompt", "")
     bbox_validation_enabled = (await _get_setting(db, "bbox_validation_enabled", "true")).lower() == "true"
-    building_provider = await _get_setting(db, "building_footprint_provider", "msft")
     overture_release = await _get_setting(db, "overture_release", "2026-02-18.0")
+    # Per-scan performance settings (safe parsing — bad values fall back to defaults)
+    try:
+        tile_concurrency = max(1, int(await _get_setting(db, "tile_concurrency", str(settings.tile_concurrency))))
+    except (ValueError, TypeError):
+        tile_concurrency = settings.tile_concurrency
+    try:
+        tile_delay_s = max(0.0, float(await _get_setting(db, "tile_delay_s", str(settings.tile_delay_s))))
+    except (ValueError, TypeError):
+        tile_delay_s = settings.tile_delay_s
+    try:
+        max_image_mb = max(1, int(await _get_setting(db, "max_image_mb", str(settings.max_image_mb))))
+    except (ValueError, TypeError):
+        max_image_mb = settings.max_image_mb
+    duckdb_memory_limit = await _get_setting(db, "duckdb_memory_limit", "128MB")
+    try:
+        duckdb_threads = max(1, int(await _get_setting(db, "duckdb_threads", "2")))
+    except (ValueError, TypeError):
+        duckdb_threads = 2
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -111,8 +136,12 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "correction_mode": correction_mode,
         "verification_correction_prompt": verification_correction_prompt,
         "bbox_validation_enabled": bbox_validation_enabled,
-        "building_provider": building_provider,
         "overture_release": overture_release,
+        "tile_concurrency": tile_concurrency,
+        "tile_delay_s": tile_delay_s,
+        "max_image_mb": max_image_mb,
+        "duckdb_memory_limit": duckdb_memory_limit,
+        "duckdb_threads": duckdb_threads,
     }
 
 
@@ -302,49 +331,44 @@ async def run_pipeline(scan_id, db: AsyncSession):
     _heavy_acquired = False
 
     try:
-        # ── STEP 1: OSM BUILDINGS CHECK ──────────────────────────
+        # ── STEP 1: MSFT BUILDINGS CHECK ─────────────────────────
         step_num += 1
-        scan.status = ScanStatus.running_osm
+        scan.status = ScanStatus.running_msft
         await db.commit()
 
-        osm_start = time.monotonic()
-        buildings = await query_osm_buildings(lat, lng, settings.search_radius_m)
-        scan.osm_building_count = len(buildings)
+        msft_start = time.monotonic()
+        msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
 
-        osm_decision = None
-        osm_building_info = None
+        msft_decision = None
+        msft_building_info = None
 
-        if buildings:
-            building = find_target_building(buildings, lat, lng)
+        if msft_buildings:
+            building = find_target_building_msft(msft_buildings, lat, lng)
             if building:
-                scan.osm_building_id = building["id"]
+                msft_target_ids = set(building.get("ids", [building["id"]]))
                 lats = [c[0] for c in building["coords"]]
                 lngs = [c[1] for c in building["coords"]]
                 raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
                 osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
-                method = ScanMethod.osm_building
-                osm_building_info = {
-                    "osm_id": building["id"],
+                method = ScanMethod.msft_buildings
+                msft_building_info = {
+                    "coord_count": len(building["coords"]),
                     "raw_bbox": list(raw_bbox),
                     "buffered_bbox": list(osm_bbox),
-                    "coord_count": len(building["coords"]),
                 }
-                osm_decision = f"Found target building OSM #{building['id']} among {len(buildings)} buildings. Applied {buffer_m}m buffer."
+                msft_decision = f"Found target building among {len(msft_buildings)} MSFT buildings. Applied {buffer_m}m buffer."
             else:
-                osm_decision = f"Found {len(buildings)} buildings but none matched target coordinates."
+                msft_decision = f"Found {len(msft_buildings)} MSFT buildings but none matched target coordinates."
         else:
-            osm_decision = "No buildings found within search radius."
+            msft_decision = "No MSFT buildings found (no data for region or query failed)."
 
-        osm_elapsed = int((time.monotonic() - osm_start) * 1000)
-        scan.osm_duration_ms = osm_elapsed
-        await db.commit()
-
+        msft_elapsed = int((time.monotonic() - msft_start) * 1000)
         await _record_step(
-            db, scan_id, step_num, "osm_check",
+            db, scan_id, step_num, "msft_buildings_check",
             status="completed",
             started_at=scan.started_at,
             completed_at=datetime.now(timezone.utc),
-            duration_ms=osm_elapsed,
+            duration_ms=msft_elapsed,
             input_summary=json.dumps({
                 "facility_name": facility_name,
                 "lat": lat,
@@ -352,76 +376,133 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 "search_radius_m": settings.search_radius_m,
             }),
             output_summary=json.dumps({
-                "buildings_found": len(buildings),
-                "target_building": osm_building_info,
+                "buildings_found": len(msft_buildings),
+                "target": msft_building_info,
                 "bbox": list(osm_bbox) if osm_bbox else None,
             }),
-            decision=osm_decision,
+            decision=msft_decision,
         )
 
-        # ── STEP 2: MSFT/OVERTURE FALLBACK (if OSM missed) ───────
+        # ── STEP 2: OSM BUILDINGS FALLBACK (if MSFT missed) ──────
         if osm_bbox is None:
             step_num += 1
-            building_provider = config["building_provider"]
-            scan.status = ScanStatus.running_overture if building_provider == "overture" else ScanStatus.running_msft
+            scan.status = ScanStatus.running_osm
             await db.commit()
-            msft_start = time.monotonic()
 
-            if building_provider == "overture":
-                msft_buildings = await query_overture_buildings(
-                    lat, lng, settings.search_radius_m, release=config["overture_release"]
-                )
-            else:
-                msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
+            osm_start = time.monotonic()
+            buildings = await query_osm_buildings(lat, lng, settings.search_radius_m)
+            scan.osm_building_count = len(buildings)
 
-            msft_decision = None
-            msft_building_info = None
+            osm_decision = None
+            osm_building_info = None
 
-            if msft_buildings:
-                building = find_target_building_msft(msft_buildings, lat, lng)
+            if buildings:
+                building = find_target_building(buildings, lat, lng)
                 if building:
-                    msft_target_ids = set(building.get("ids", [building["id"]]))
+                    scan.osm_building_id = building["id"]
                     lats = [c[0] for c in building["coords"]]
                     lngs = [c[1] for c in building["coords"]]
                     raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
                     osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
-                    method = ScanMethod.overture_buildings if building_provider == "overture" else ScanMethod.msft_buildings
-                    msft_building_info = {
+                    method = ScanMethod.osm_building
+                    osm_building_info = {
+                        "osm_id": building["id"],
+                        "raw_bbox": list(raw_bbox),
+                        "buffered_bbox": list(osm_bbox),
+                        "coord_count": len(building["coords"]),
+                    }
+                    osm_decision = f"Found target building OSM #{building['id']} among {len(buildings)} buildings. Applied {buffer_m}m buffer."
+                else:
+                    osm_decision = f"Found {len(buildings)} buildings but none matched target coordinates."
+            else:
+                osm_decision = "No buildings found within search radius."
+
+            osm_elapsed = int((time.monotonic() - osm_start) * 1000)
+            scan.osm_duration_ms = osm_elapsed
+            await db.commit()
+
+            await _record_step(
+                db, scan_id, step_num, "osm_check",
+                status="completed",
+                completed_at=datetime.now(timezone.utc),
+                duration_ms=osm_elapsed,
+                input_summary=json.dumps({
+                    "facility_name": facility_name,
+                    "lat": lat,
+                    "lng": lng,
+                    "search_radius_m": settings.search_radius_m,
+                }),
+                output_summary=json.dumps({
+                    "buildings_found": len(buildings),
+                    "target_building": osm_building_info,
+                    "bbox": list(osm_bbox) if osm_bbox else None,
+                }),
+                decision=osm_decision,
+            )
+
+        # ── STEP 3: OVERTURE FALLBACK (if both missed) ───────────
+        if osm_bbox is None:
+            step_num += 1
+            scan.status = ScanStatus.running_overture
+            await db.commit()
+
+            overture_start = time.monotonic()
+            overture_buildings = await query_overture_buildings(
+                lat, lng, settings.search_radius_m, release=config["overture_release"],
+                duckdb_memory_limit=config["duckdb_memory_limit"],
+                duckdb_threads=config["duckdb_threads"],
+            )
+
+            overture_decision = None
+            overture_building_info = None
+
+            if overture_buildings:
+                building = find_target_building_msft(overture_buildings, lat, lng)
+                if building:
+                    msft_target_ids = set(building.get("ids", [building["id"]]))
+                    msft_buildings = overture_buildings  # for overlay in AI validation
+                    lats = [c[0] for c in building["coords"]]
+                    lngs = [c[1] for c in building["coords"]]
+                    raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
+                    osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
+                    method = ScanMethod.overture_buildings
+                    overture_building_info = {
                         "coord_count": len(building["coords"]),
                         "raw_bbox": list(raw_bbox),
                         "buffered_bbox": list(osm_bbox),
                     }
-                    msft_decision = f"Found target building among {len(msft_buildings)} {building_provider.upper()} buildings. Applied {buffer_m}m buffer."
+                    overture_decision = f"Found target building among {len(overture_buildings)} Overture buildings. Applied {buffer_m}m buffer."
                 else:
-                    msft_decision = f"Found {len(msft_buildings)} {building_provider.upper()} buildings but none matched target coordinates."
+                    overture_decision = f"Found {len(overture_buildings)} Overture buildings but none matched target coordinates."
             else:
-                msft_decision = f"No {building_provider.upper()} buildings found (no data for region or query failed)."
+                overture_decision = "No Overture buildings found (no data for region or query failed)."
 
-            msft_elapsed = int((time.monotonic() - msft_start) * 1000)
-            step_name = "overture_buildings_check" if building_provider == "overture" else "msft_buildings_check"
+            overture_elapsed = int((time.monotonic() - overture_start) * 1000)
             await _record_step(
-                db, scan_id, step_num, step_name,
+                db, scan_id, step_num, "overture_buildings_check",
                 status="completed",
-                duration_ms=msft_elapsed,
+                duration_ms=overture_elapsed,
                 input_summary=json.dumps({
                     "lat": lat,
                     "lng": lng,
                     "search_radius_m": settings.search_radius_m,
-                    "provider": building_provider,
+                    "overture_release": config["overture_release"],
                 }),
                 output_summary=json.dumps({
-                    "buildings_found": len(msft_buildings),
-                    "target": msft_building_info,
+                    "buildings_found": len(overture_buildings),
+                    "target": overture_building_info,
                     "bbox": list(osm_bbox) if osm_bbox else None,
                 }),
-                decision=msft_decision,
+                decision=overture_decision,
             )
 
-        # ── HEAVY PHASE GATE (steps 3-5 under memory semaphore) ──
+        # ── HEAVY PHASE GATE (steps 4-6 under memory semaphore) ──
+        if _heavy_semaphore is None:
+            init_heavy_semaphore()
         await _heavy_semaphore.acquire()
         _heavy_acquired = True
 
-        # ── STEP 3: AI VALIDATION (if MSFT or OSM found something) ─
+        # ── STEP 4: AI VALIDATION (if MSFT, OSM, or Overture found something) ─
         if osm_bbox and config["api_key"]:
             step_num += 1
             scan.status = ScanStatus.running_validate
@@ -433,7 +514,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
             # Capture overview at OSM bbox for validation
             ov_img, ov_grid = await asyncio.to_thread(
                 capture_area,
-                *osm_bbox, overview_zoom, cache, settings.tile_delay_s,
+                *osm_bbox, overview_zoom, cache, config["tile_delay_s"],
+                max_image_mb=config["max_image_mb"], max_workers=config["tile_concurrency"],
             )
 
             if ov_img:
@@ -484,20 +566,20 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         scan.ai_notes = validation.notes
                         if validation.approved:
                             final_bbox = osm_bbox
-                            val_decision = f"APPROVED — AI confirmed OSM bbox covers the facility. Type: {validation.facility_type}"
-                            logger.info("AI approved OSM bbox")
+                            val_decision = f"APPROVED — AI confirmed footprint bbox covers the facility. Type: {validation.facility_type}"
+                            logger.info("AI approved footprint bbox")
                         else:
                             val_decision = f"REJECTED — {validation.reason}. Falling through to AI vision."
-                            logger.info("AI rejected OSM bbox: %s", validation.reason)
+                            logger.info("AI rejected footprint bbox: %s", validation.reason)
                             method = None
                     else:
                         final_bbox = osm_bbox
-                        val_decision = f"AI validation failed: {validation_error or 'unknown error'}. Using OSM bbox as fallback."
-                        logger.warning("Validation call failed, using OSM bbox anyway")
+                        val_decision = f"AI validation failed: {validation_error or 'unknown error'}. Using footprint bbox as fallback."
+                        logger.warning("Validation call failed, using footprint bbox anyway")
                 else:
                     final_bbox = osm_bbox
-                    val_decision = "BBox AI validation disabled in settings. Using OSM/MSFT bbox directly."
-                    logger.info("BBox AI validation disabled, using bbox directly")
+                    val_decision = "BBox AI validation disabled in settings. Using footprint bbox directly."
+                    logger.info("BBox AI validation disabled, using footprint bbox directly")
 
                 ai_elapsed = int((time.monotonic() - ai_start) * 1000)
 
@@ -540,17 +622,17 @@ async def run_pipeline(scan_id, db: AsyncSession):
             scan.ai_duration_ms = int((time.monotonic() - ai_start) * 1000)
             await db.commit()
         elif osm_bbox:
-            # No API key — just use OSM bbox
+            # No API key — just use footprint bbox
             step_num += 1
             final_bbox = osm_bbox
             await _record_step(
                 db, scan_id, step_num, "ai_validation",
                 status="skipped",
-                decision="No OpenAI API key configured. Using OSM bbox without AI validation.",
+                decision="No OpenAI API key configured. Using footprint bbox without AI validation.",
                 duration_ms=0,
             )
 
-        # ── STEP 4: AI VISION FALLBACK ─────────────────────────────
+        # ── STEP 5: AI VISION FALLBACK ─────────────────────────────
         if final_bbox is None and config["api_key"]:
             step_num += 1
             scan.status = ScanStatus.running_vision
@@ -563,7 +645,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
             wide_bbox = bbox_add_buffer(lat, lng, lat, lng, settings.overview_radius_m)
             ov_img, ov_grid = await asyncio.to_thread(
                 capture_area,
-                *wide_bbox, overview_zoom, cache, settings.tile_delay_s,
+                *wide_bbox, overview_zoom, cache, config["tile_delay_s"],
+                max_image_mb=config["max_image_mb"], max_workers=config["tile_concurrency"],
             )
 
             if ov_img and ov_grid:
@@ -971,7 +1054,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
         # ── FAIL if no boundary found ─────────────────────────────
         if final_bbox is None:
-            raise RuntimeError("No building boundary found by OSM, MSFT, or AI Vision.")
+            raise RuntimeError("No building boundary found by MSFT, OSM, Overture, or AI Vision.")
 
         # Record bbox
         scan.method = method
@@ -982,7 +1065,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
         scan.bbox_height_m = height_m
         await db.commit()
 
-        # ── STEP 5: TILING ─────────────────────────────────────────
+        # ── STEP 6: TILING ─────────────────────────────────────────
         step_num += 1
         scan.status = ScanStatus.running_tiling
         await db.commit()
@@ -992,7 +1075,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
         detail_img, grid_info = await asyncio.to_thread(
             capture_area,
-            *final_bbox, zoom, cache, settings.tile_delay_s,
+            *final_bbox, zoom, cache, config["tile_delay_s"],
+            max_image_mb=config["max_image_mb"], max_workers=config["tile_concurrency"],
         )
 
         tile_decision = None
@@ -1045,7 +1129,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 "bbox_width_m": round(width_m, 1),
                 "bbox_height_m": round(height_m, 1),
                 "zoom": zoom,
-                "tile_delay_s": settings.tile_delay_s,
+                "tile_delay_s": config["tile_delay_s"],
             }),
             output_summary=json.dumps({
                 "tile_grid": f"{grid_cols}x{grid_rows}" if grid_info else None,
@@ -1063,7 +1147,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
         _heavy_semaphore.release()
         _heavy_acquired = False
 
-        # ── STEP 6: DONE ──────────────────────────────────────────
+        # ── STEP 7: DONE ──────────────────────────────────────────
         step_num += 1
         scan.status = ScanStatus.completed
         scan.completed_at = datetime.now(timezone.utc)

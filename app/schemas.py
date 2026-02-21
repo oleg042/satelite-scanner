@@ -49,7 +49,17 @@ class SettingsUpdate(BaseModel):
     correction_mode: Optional[str] = None
     verification_correction_prompt: Optional[str] = None
     bbox_validation_enabled: Optional[str] = None
-    building_footprint_provider: Optional[str] = None
+    # Performance (per-scan, dynamic)
+    tile_concurrency: Optional[str] = None
+    tile_delay_s: Optional[str] = None
+    max_image_mb: Optional[str] = None
+    duckdb_memory_limit: Optional[str] = None
+    duckdb_threads: Optional[str] = None
+    # Infrastructure (require restart)
+    worker_concurrency: Optional[str] = None
+    heavy_phase_concurrency: Optional[str] = None
+    browser_concurrency: Optional[str] = None
+    stale_scan_timeout_minutes: Optional[str] = None
 
 
 # --- Responses ---
@@ -126,7 +136,17 @@ class SettingsResponse(BaseModel):
     correction_mode: str = ""
     verification_correction_prompt: str = ""
     bbox_validation_enabled: str = ""
-    building_footprint_provider: str = ""
+    # Performance (per-scan, dynamic)
+    tile_concurrency: str = ""
+    tile_delay_s: str = ""
+    max_image_mb: str = ""
+    duckdb_memory_limit: str = ""
+    duckdb_threads: str = ""
+    # Infrastructure (require restart)
+    worker_concurrency: str = ""
+    heavy_phase_concurrency: str = ""
+    browser_concurrency: str = ""
+    stale_scan_timeout_minutes: str = ""
 
 
 class ScanStepResponse(BaseModel):

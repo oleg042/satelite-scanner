@@ -12,10 +12,11 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.router import api_router, health_router, shutdown_browser
+from app.api.router import api_router, health_router, init_browser_semaphore, shutdown_browser
 from app.config import settings
 from app.database import engine
 from app.models import Base, Setting
+from app.scanner.pipeline import init_heavy_semaphore
 from app.worker import recover_stuck_scans, stale_scan_watchdog, worker_pool
 
 logging.basicConfig(
@@ -36,6 +37,17 @@ DEFAULT_SETTINGS = {
     "validation_prompt": "",
     "boundary_prompt": "",
     "verification_prompt": "",
+    # Performance (per-scan, dynamic)
+    "tile_concurrency": str(settings.tile_concurrency),
+    "tile_delay_s": str(settings.tile_delay_s),
+    "max_image_mb": str(settings.max_image_mb),
+    "duckdb_memory_limit": "128MB",
+    "duckdb_threads": "2",
+    # Infrastructure (require restart)
+    "worker_concurrency": str(settings.worker_concurrency),
+    "heavy_phase_concurrency": str(settings.heavy_phase_concurrency),
+    "browser_concurrency": str(settings.browser_concurrency),
+    "stale_scan_timeout_minutes": str(settings.stale_scan_timeout_minutes),
 }
 
 
@@ -136,15 +148,39 @@ async def lifespan(app: FastAPI):
 
     await _init_db()
 
+    # Read infrastructure settings from DB for startup initialization
+    from app.database import async_session as _async_session
+    from sqlalchemy import select as _select
+
+    async with _async_session() as _db:
+        _result = await _db.execute(_select(Setting))
+        _db_settings = {s.key: s.value for s in _result.scalars().all()}
+
+    def _safe_int(val: str, fallback: int, minimum: int = 1) -> int:
+        try:
+            return max(minimum, int(val))
+        except (ValueError, TypeError):
+            return fallback
+
+    _worker_n = _safe_int(_db_settings.get("worker_concurrency", ""), settings.worker_concurrency)
+    _heavy_n = _safe_int(_db_settings.get("heavy_phase_concurrency", ""), settings.heavy_phase_concurrency)
+    _browser_n = _safe_int(_db_settings.get("browser_concurrency", ""), settings.browser_concurrency)
+    _stale_timeout = _safe_int(_db_settings.get("stale_scan_timeout_minutes", ""), settings.stale_scan_timeout_minutes, minimum=5)
+
+    init_heavy_semaphore(_heavy_n)
+    init_browser_semaphore(_browser_n)
+    logger.info("Infrastructure init: workers=%d, heavy=%d, browser=%d, stale_timeout=%dm",
+                _worker_n, _heavy_n, _browser_n, _stale_timeout)
+
     # Recover scans stuck from a previous crash/restart
     await recover_stuck_scans()
 
     # Start background worker
-    worker_task = asyncio.create_task(worker_pool())
+    worker_task = asyncio.create_task(worker_pool(n=_worker_n))
     logger.info("Background worker started")
 
     # Start stale scan watchdog
-    watchdog_task = asyncio.create_task(stale_scan_watchdog())
+    watchdog_task = asyncio.create_task(stale_scan_watchdog(timeout_minutes=_stale_timeout))
 
     yield
 

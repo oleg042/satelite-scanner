@@ -29,7 +29,14 @@ logger = logging.getLogger(__name__)
 _pw = None          # Playwright instance
 _browser = None     # Chromium browser instance
 _browser_lock = asyncio.Lock()
-_browser_semaphore = asyncio.Semaphore(app_settings.browser_concurrency)  # ~150MB each
+_browser_semaphore: asyncio.Semaphore | None = None
+
+
+def init_browser_semaphore(concurrency: int | None = None):
+    """Initialize the browser semaphore. Called once at startup from lifespan."""
+    global _browser_semaphore
+    n = concurrency if concurrency is not None else app_settings.browser_concurrency
+    _browser_semaphore = asyncio.Semaphore(n)  # ~150MB each
 
 
 async def _get_browser():
@@ -114,7 +121,17 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         correction_mode=settings_dict.get("correction_mode", ""),
         verification_correction_prompt=settings_dict.get("verification_correction_prompt", ""),
         bbox_validation_enabled=settings_dict.get("bbox_validation_enabled", "true"),
-        building_footprint_provider=settings_dict.get("building_footprint_provider", ""),
+        # Performance (per-scan, dynamic)
+        tile_concurrency=settings_dict.get("tile_concurrency", ""),
+        tile_delay_s=settings_dict.get("tile_delay_s", ""),
+        max_image_mb=settings_dict.get("max_image_mb", ""),
+        duckdb_memory_limit=settings_dict.get("duckdb_memory_limit", ""),
+        duckdb_threads=settings_dict.get("duckdb_threads", ""),
+        # Infrastructure (require restart)
+        worker_concurrency=settings_dict.get("worker_concurrency", ""),
+        heavy_phase_concurrency=settings_dict.get("heavy_phase_concurrency", ""),
+        browser_concurrency=settings_dict.get("browser_concurrency", ""),
+        stale_scan_timeout_minutes=settings_dict.get("stale_scan_timeout_minutes", ""),
     )
 
 
@@ -298,6 +315,8 @@ async def _google_search_resolve(query: str) -> dict | None:
         logger.warning("Playwright not installed — Google Maps geocoding unavailable")
         return None
 
+    if _browser_semaphore is None:
+        init_browser_semaphore()
     context = None
     async with _browser_semaphore:
         try:

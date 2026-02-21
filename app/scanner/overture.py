@@ -7,6 +7,7 @@ reads the 1-3 files covering the target area instead of all 237 (~230GB).
 import asyncio
 import json
 import logging
+import re
 
 import duckdb
 import httpx
@@ -114,7 +115,14 @@ def _find_matching_files(lat: float, lng: float, release: str) -> list[str]:
     return matches
 
 
-def _new_connection():
+def _sanitize_memory_limit(val: str) -> str:
+    """Validate DuckDB memory_limit format (e.g. '128MB', '1GB'). Falls back to '128MB'."""
+    if re.fullmatch(r"\d+\s*[KMGT]?B", val.strip(), re.IGNORECASE):
+        return val.strip()
+    return "128MB"
+
+
+def _new_connection(memory_limit: str = "128MB", threads: int = 2):
     """Create a fresh DuckDB connection with spatial + httpfs extensions.
 
     Each query gets its own connection that is closed after use,
@@ -126,12 +134,15 @@ def _new_connection():
     con.install_extension("httpfs")
     con.load_extension("httpfs")
     con.sql("SET s3_region='us-west-2'")
-    con.sql("SET memory_limit='128MB'")
-    con.sql("SET threads=2")
+    con.sql(f"SET memory_limit='{_sanitize_memory_limit(memory_limit)}'")
+    con.sql(f"SET threads={max(1, int(threads))}")
     return con
 
 
-def _query_sync(lat: float, lng: float, search_radius_m: int, s3_paths: list[str]) -> list[dict]:
+def _query_sync(
+    lat: float, lng: float, search_radius_m: int, s3_paths: list[str],
+    duckdb_memory_limit: str = "128MB", duckdb_threads: int = 2,
+) -> list[dict]:
     """Run DuckDB query against specific Overture S3 files (blocking)."""
     dlat = search_radius_m / M_PER_DEG_LAT
     dlng = search_radius_m / meters_per_deg_lng(lat)
@@ -140,7 +151,7 @@ def _query_sync(lat: float, lng: float, search_radius_m: int, s3_paths: list[str
     min_lng = lng - dlng
     max_lng = lng + dlng
 
-    con = _new_connection()
+    con = _new_connection(memory_limit=duckdb_memory_limit, threads=duckdb_threads)
 
     # Build file list as a SQL literal — parameterized binding for read_parquet's
     # file list argument is unreliable across DuckDB versions.
@@ -222,7 +233,8 @@ def _query_sync(lat: float, lng: float, search_radius_m: int, s3_paths: list[str
 
 
 async def query_overture_buildings(
-    lat: float, lng: float, search_radius_m: int = 200, release: str = "2026-02-18.0"
+    lat: float, lng: float, search_radius_m: int = 200, release: str = "2026-02-18.0",
+    *, duckdb_memory_limit: str = "128MB", duckdb_threads: int = 2,
 ) -> list[dict]:
     """Query Overture Maps for buildings near coordinates.
 
@@ -242,7 +254,8 @@ async def query_overture_buildings(
             s3_paths = [_OVERTURE_S3_GLOB.format(release=release)]
 
         buildings = await asyncio.to_thread(
-            _query_sync, lat, lng, search_radius_m, s3_paths
+            _query_sync, lat, lng, search_radius_m, s3_paths,
+            duckdb_memory_limit, duckdb_threads,
         )
         logger.info(
             "Overture: %d buildings near (%.4f, %.4f) [release=%s, files=%d]",

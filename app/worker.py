@@ -70,12 +70,13 @@ async def recover_stuck_scans():
         return len(stuck_scans)
 
 
-async def stale_scan_watchdog():
+async def stale_scan_watchdog(timeout_minutes: int | None = None):
     """Periodically check for scans stuck in running_* states too long.
 
     Catches workers hung on external API calls (OpenAI, OSM, tile servers).
     """
-    timeout_minutes = settings.stale_scan_timeout_minutes
+    if timeout_minutes is None:
+        timeout_minutes = settings.stale_scan_timeout_minutes
     check_interval = max(timeout_minutes * 60 // 2, 60)
 
     logger.info(
@@ -136,9 +137,10 @@ async def _worker(worker_id: int):
             scan_queue.task_done()
 
 
-async def worker_pool():
+async def worker_pool(n: int | None = None):
     """Spawn N concurrent workers pulling from the same queue."""
-    n = settings.worker_concurrency
+    if n is None:
+        n = settings.worker_concurrency
     logger.info("Starting worker pool with %d concurrent workers", n)
     tasks = [asyncio.create_task(_worker(i)) for i in range(n)]
     await asyncio.gather(*tasks)
