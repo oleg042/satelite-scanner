@@ -214,11 +214,7 @@ async def enqueue_scans(
     scans = result.scalars().all()
 
     queued = 0
-    skipped = 0
     for scan in scans:
-        if scan.lat is None or scan.lng is None:
-            skipped += 1
-            continue
         scan.status = ScanStatus.queued
         scan.error_message = None
         queued += 1
@@ -226,26 +222,21 @@ async def enqueue_scans(
     await db.commit()
 
     for scan in scans:
-        if scan.lat is not None and scan.lng is not None:
-            await enqueue_scan(scan.id)
+        await enqueue_scan(scan.id)
 
-    return {"queued": queued, "skipped_no_coords": skipped}
+    return {"queued": queued}
 
 
 @router.post("/scans/enqueue-pending", status_code=200)
 async def enqueue_all_pending(db: AsyncSession = Depends(get_db)):
-    """Enqueue all pending scans that have coordinates."""
+    """Enqueue all pending scans — pipeline handles geocoding from address."""
     result = await db.execute(
         select(Scan).where(Scan.status == ScanStatus.pending)
     )
     scans = result.scalars().all()
 
     queued = 0
-    skipped = 0
     for scan in scans:
-        if scan.lat is None or scan.lng is None:
-            skipped += 1
-            continue
         scan.status = ScanStatus.queued
         scan.error_message = None
         queued += 1
@@ -253,10 +244,9 @@ async def enqueue_all_pending(db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     for scan in scans:
-        if scan.lat is not None and scan.lng is not None and scan.status == ScanStatus.queued:
-            await enqueue_scan(scan.id)
+        await enqueue_scan(scan.id)
 
-    return {"queued": queued, "skipped_no_coords": skipped}
+    return {"queued": queued}
 
 
 def _parse_json_field(text: str | None) -> dict | None:
