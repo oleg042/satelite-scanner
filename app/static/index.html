@@ -569,9 +569,14 @@ function fmtAI(scan) {
   return '<span class="text-gray-600">-</span>';
 }
 
-function fmtMethod(m) {
+function fmtMethod(m, lat, lng) {
   if (!m) return '-';
-  return m.replace(/_/g, ' ');
+  const label = m.replace(/_/g, ' ');
+  if (m === 'msft_buildings' && lat != null && lng != null) {
+    const url = `https://planetarycomputer.microsoft.com/explore?c=${encodeURIComponent(lng + ',' + lat)}&z=17&v=2&d=ms-buildings&m=Global&r=Default&s=false%3A%3A100%3A%3Atrue&sr=desc&ae=0`;
+    return `<a href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300 underline" title="View on Microsoft Planetary Computer">${label}</a>`;
+  }
+  return label;
 }
 
 function fmtCoords(scan) {
@@ -641,7 +646,7 @@ function renderTable() {
       <td class="px-3 py-2 text-gray-400 max-w-[14rem] truncate" title="${esc(scan.facility_address || '')}">${esc(scan.facility_address || '-')}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
-      <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method)}</td>
+      <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method, scan.facility_lat, scan.facility_lng)}</td>
       <td class="px-3 py-2 text-gray-400 max-w-[10rem] truncate" title="${esc(scan.ai_facility_type || '')}">${fmtType(scan.ai_facility_type)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
