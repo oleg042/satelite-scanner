@@ -94,7 +94,12 @@ def _find_matching_files(lat: float, lng: float, release: str) -> list[str]:
     items = _stac_cache.get(release, [])
     matches = []
     for item in items:
-        xmin, ymin, xmax, ymax = item["bbox"]
+        b = item["bbox"]
+        # STAC bbox: [west, south, east, north] or 6-element [w, s, zmin, e, n, zmax]
+        if len(b) == 6:
+            xmin, ymin, xmax, ymax = b[0], b[1], b[3], b[4]
+        else:
+            xmin, ymin, xmax, ymax = b
         if xmin <= lng <= xmax and ymin <= lat <= ymax:
             matches.append(item["href"])
 
@@ -136,13 +141,18 @@ def _query_sync(lat: float, lng: float, search_radius_m: int, s3_paths: list[str
 
     con = _new_connection()
 
-    query = """
+    # Build file list as a SQL literal — parameterized binding for read_parquet's
+    # file list argument is unreliable across DuckDB versions.
+    escaped = ", ".join(f"'{p}'" for p in s3_paths)
+    path_list_sql = f"[{escaped}]"
+
+    query = f"""
         SELECT
             id,
             ST_AsGeoJSON(geometry) AS geojson,
             height,
             num_floors
-        FROM read_parquet(?, hive_partitioning=1)
+        FROM read_parquet({path_list_sql}, hive_partitioning=1)
         WHERE bbox.xmin <= ?
           AND bbox.xmax >= ?
           AND bbox.ymin <= ?
@@ -150,7 +160,7 @@ def _query_sync(lat: float, lng: float, search_radius_m: int, s3_paths: list[str
     """
 
     try:
-        result = con.execute(query, [s3_paths, max_lng, min_lng, max_lat, min_lat]).fetchall()
+        result = con.execute(query, [max_lng, min_lng, max_lat, min_lat]).fetchall()
     except Exception as e:
         logger.error("Overture DuckDB query failed for %d file(s): %s", len(s3_paths), e)
         return []
