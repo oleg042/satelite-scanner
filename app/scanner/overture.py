@@ -68,11 +68,12 @@ async def _fetch_stac_index(release: str) -> list[dict]:
                     r.raise_for_status()
                 item = r.json()
                 bbox = item.get("bbox")
-                # Find the S3 parquet asset
+                # Find the S3 parquet asset — nested under alternate.s3
                 s3_href = None
                 for asset in item.get("assets", {}).values():
-                    href_val = asset.get("href", "")
-                    if href_val.startswith("s3://") and href_val.endswith(".parquet"):
+                    alt_s3 = asset.get("alternate", {}).get("s3", {})
+                    href_val = alt_s3.get("href", "")
+                    if href_val.startswith("s3://"):
                         s3_href = href_val
                         break
                 if bbox and s3_href:
