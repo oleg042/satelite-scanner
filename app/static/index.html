@@ -17,6 +17,8 @@
   .nav-item.active{background:#1d4ed8;color:#fff}
   .boundary-overlay{position:absolute;border:2px solid #ef4444;pointer-events:none;z-index:5;border-radius:2px}
   #image-modal .boundary-overlay{border-width:3px}
+  .msft-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:4}
+  #image-modal .msft-overlay polygon{stroke-width:3}
   #image-modal{transition:opacity .2s}
   #image-modal.hidden{opacity:0;pointer-events:none}
 </style>
@@ -263,7 +265,17 @@
 
         <!-- Models -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="text-sm text-gray-300">BBox AI Validation</span>
+              <div class="relative">
+                <input id="set-bbox-validation" type="checkbox" class="sr-only peer">
+                <div class="w-9 h-5 bg-gray-700 rounded-full peer-checked:bg-blue-600 transition-colors"></div>
+                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+              </div>
+            </label>
+          </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label class="block text-sm text-gray-300 mb-1.5">Validation Model</label>
@@ -696,14 +708,15 @@ function esc(str) {
 }
 
 // --- Image modal ---
-function openImageModal(url, label, overlayData) {
+function openImageModal(url, label, overlayData, msftData) {
   const modal = document.getElementById('image-modal');
   const img = document.getElementById('image-modal-img');
   const container = document.getElementById('image-modal-container');
   const caption = document.getElementById('image-modal-caption');
 
-  // Clear previous overlay
+  // Clear previous overlays
   container.querySelectorAll('.boundary-overlay').forEach(el => el.remove());
+  container.querySelectorAll('.msft-overlay').forEach(el => el.remove());
 
   img.onload = null;
   img.src = url;
@@ -713,9 +726,10 @@ function openImageModal(url, label, overlayData) {
   captionHtml += ` &mdash; <a href="${url}" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">Open original in new tab ↗</a>`;
   caption.innerHTML = captionHtml;
 
-  if (overlayData) {
+  if (overlayData || msftData) {
     img.onload = function() {
-      drawBoundaryOverlay(img, overlayData.bbox, overlayData.origW, overlayData.origH);
+      if (overlayData) drawBoundaryOverlay(img, overlayData.bbox, overlayData.origW, overlayData.origH);
+      if (msftData) drawMsftOverlay(img, msftData.polygons, msftData.origW, msftData.origH);
     };
   }
 
@@ -763,6 +777,34 @@ function drawBoundaryOverlay(imgEl, pixelBbox, origWidth, origHeight) {
   container.appendChild(overlay);
 }
 
+// --- MSFT polygon overlay ---
+function drawMsftOverlay(imgEl, polygons, origWidth, origHeight) {
+  const container = imgEl.closest('.bbox-overlay-container');
+  if (!container) return;
+  container.querySelectorAll('.msft-overlay').forEach(el => el.remove());
+
+  const rW = imgEl.clientWidth, rH = imgEl.clientHeight;
+  if (!rW || !rH) return;
+  const scaleX = rW / origWidth, scaleY = rH / origHeight;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'msft-overlay');
+  svg.setAttribute('width', rW);
+  svg.setAttribute('height', rH);
+
+  polygons.forEach(pts => {
+    const points = pts.map(([x, y]) => `${x * scaleX},${y * scaleY}`).join(' ');
+    const pg = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    pg.setAttribute('points', points);
+    pg.setAttribute('fill', 'rgba(0,120,255,0.15)');
+    pg.setAttribute('stroke', 'rgba(0,120,255,0.7)');
+    pg.setAttribute('stroke-width', '2');
+    svg.appendChild(pg);
+  });
+
+  container.appendChild(svg);
+}
+
 // --- Detail panel ---
 function renderDetail(scan) {
   const trace = S.expanded[scan.id];
@@ -790,24 +832,52 @@ function renderDetail(scan) {
         }
       }
 
+      // Check for MSFT polygon overlay on overview screenshots
+      let msftData = null;
+      if (ss.type === 'overview' && trace && trace.steps) {
+        const valStep = trace.steps.find(s => s.step_name === 'ai_validation');
+        if (valStep && valStep.input_summary && valStep.input_summary.msft_polygons_px) {
+          const dimStr = valStep.input_summary.overview_image;
+          const dimMatch = dimStr ? dimStr.match(/(\d+)x(\d+)/) : null;
+          if (dimMatch) {
+            msftData = {
+              polygons: valStep.input_summary.msft_polygons_px,
+              origW: parseInt(dimMatch[1]),
+              origH: parseInt(dimMatch[2])
+            };
+          }
+        }
+      }
+
       const label = `${ss.type} (z${ss.zoom || '?'})${sizeStr}`;
       const overlayArg = overlayData ? JSON.stringify(overlayData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
+      const msftArg = msftData ? JSON.stringify(msftData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
 
       const thumbSrc = ss.thumb_url || ss.url;
-      if (overlayData) {
-        const bboxJson = JSON.stringify(overlayData.bbox).replace(/"/g, '&quot;');
+      if (overlayData || msftData) {
+        let onloadCalls = '';
+        if (overlayData) {
+          const bboxJson = JSON.stringify(overlayData.bbox).replace(/"/g, '&quot;');
+          onloadCalls += `drawBoundaryOverlay(this, ${bboxJson}, ${overlayData.origW}, ${overlayData.origH});`;
+        }
+        if (msftData) {
+          const msftJson = JSON.stringify(msftData.polygons).replace(/"/g, '&quot;');
+          onloadCalls += `drawMsftOverlay(this, ${msftJson}, ${msftData.origW}, ${msftData.origH});`;
+        }
+        let badges = '';
+        if (overlayData) badges += ' <span class="text-red-400">■</span> AI boundary';
+        if (msftData) badges += ' <span class="text-blue-400">■</span> MSFT polygons';
         html += `<div class="text-center">
-          <div class="relative inline-block bbox-overlay-container cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', ${overlayArg})" title="Click to enlarge">
+          <div class="relative inline-block bbox-overlay-container cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', ${overlayArg}, ${msftArg})" title="Click to enlarge">
               <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
-                onload="drawBoundaryOverlay(this, ${bboxJson}, ${overlayData.origW}, ${overlayData.origH})">
+                onload="${onloadCalls}">
           </div>
-          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr} <span class="text-red-400">■</span> AI boundary</div>
+          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}${badges}</div>
         </div>`;
       } else {
-        const msftBadge = ss.type === 'msft_overlay' ? ' <span class="text-blue-400">■</span> MSFT polygons' : '';
-        html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null)" title="Click to enlarge">
+        html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null, null)" title="Click to enlarge">
             <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}${msftBadge}</div>
+          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
         </div>`;
       }
     });
@@ -1147,6 +1217,7 @@ async function loadSettings() {
     document.getElementById('set-verification-prompt').value = s.verification_prompt || '';
     document.getElementById('set-correction-mode').value = s.correction_mode || 'v1';
     document.getElementById('set-verification-correction-prompt').value = s.verification_correction_prompt || '';
+    document.getElementById('set-bbox-validation').checked = (s.bbox_validation_enabled || 'true') === 'true';
   } catch {}
 }
 
@@ -1190,6 +1261,7 @@ async function saveSettings(e) {
   if (cm) body.correction_mode = cm;
   const vcp = document.getElementById('set-verification-correction-prompt').value.trim();
   if (vcp) body.verification_correction_prompt = vcp;
+  body.bbox_validation_enabled = document.getElementById('set-bbox-validation').checked ? 'true' : 'false';
 
   if (Object.keys(body).length === 0) {
     toast('No changes to save', 'error');

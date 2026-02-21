@@ -91,6 +91,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     verification_model = await _get_setting(db, "verification_model", "gpt-5.2")
     correction_mode = await _get_setting(db, "correction_mode", "v1")
     verification_correction_prompt = await _get_setting(db, "verification_correction_prompt", "")
+    bbox_validation_enabled = (await _get_setting(db, "bbox_validation_enabled", "true")).lower() == "true"
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -104,6 +105,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "verification_prompt": verification_prompt,
         "correction_mode": correction_mode,
         "verification_correction_prompt": verification_correction_prompt,
+        "bbox_validation_enabled": bbox_validation_enabled,
     }
 
 
@@ -175,20 +177,6 @@ async def _record_step(db: AsyncSession, scan_id, step_number: int, step_name: s
     db.add(step)
     await db.commit()
     return step
-
-
-def _draw_msft_overlay(ov_img, msft_buildings, grid_info):
-    """Draw MSFT building polygons on a copy of the overview image."""
-    from PIL import ImageDraw
-    overlay = ov_img.copy()
-    draw = ImageDraw.Draw(overlay, "RGBA")
-
-    for b in msft_buildings:
-        pixels = [latlng_to_pixel(lat, lng, grid_info) for lat, lng in b["coords"]]
-        if len(pixels) >= 3:
-            draw.polygon(pixels, fill=(0, 120, 255, 50), outline=(0, 120, 255, 200))
-
-    return overlay
 
 
 async def _downscale_overview(
@@ -435,60 +423,61 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     ov_img.width, ov_img.height,
                 )
 
-                # Draw MSFT building polygons overlay (QA/debug aid)
+                # Compute MSFT polygon pixel coords for frontend overlay
+                msft_polygons_px = None
                 if msft_buildings and ov_grid:
-                    overlay_img = _draw_msft_overlay(ov_img, msft_buildings, ov_grid)
-                    ov_rel, ov_fn, ov_abs = _save_image(
-                        overlay_img, facility_name, "msft_overlay", overview_zoom, scan_id
-                    )
-                    await _record_screenshot(
-                        db, scan_id, ScreenshotType.msft_overlay,
-                        ov_fn, ov_rel, ov_abs, overview_zoom,
-                        overlay_img.width, overlay_img.height,
-                    )
-                    overlay_img.close()
-                    await _downscale_overview(db, scan_id, ScreenshotType.msft_overlay, ov_abs)
+                    msft_polygons_px = []
+                    for b in msft_buildings:
+                        pixels = [list(latlng_to_pixel(lat, lng, ov_grid)) for lat, lng in b["coords"]]
+                        if len(pixels) >= 3:
+                            msft_polygons_px.append(pixels)
 
                 width_m, height_m = bbox_dimensions_m(*osm_bbox)
 
                 validation = None
                 validation_error = None
-                try:
-                    validation = await asyncio.to_thread(
-                        validate_osm_bbox,
-                        abs_path, facility_name, lat, lng, width_m, height_m,
-                        config["api_key"], config["validation_model"],
-                        config["validation_prompt"],
-                    )
-                except Exception as e:
-                    if _is_fatal_ai_error(e):
-                        raise RuntimeError(f"OpenAI API account error: {e}") from e
-                    validation_error = str(e)
-                    logger.warning("Validation call failed: %s", e)
-
-                ai_elapsed = int((time.monotonic() - ai_start) * 1000)
                 val_decision = None
 
-                if validation:
-                    scan.ai_validated = validation.approved
-                    scan.ai_facility_type = validation.facility_type
-                    scan.ai_notes = validation.notes
-                    if validation.approved:
-                        final_bbox = osm_bbox
-                        val_decision = f"APPROVED — AI confirmed OSM bbox covers the facility. Type: {validation.facility_type}"
-                        logger.info("AI approved OSM bbox")
+                if config["bbox_validation_enabled"]:
+                    try:
+                        validation = await asyncio.to_thread(
+                            validate_osm_bbox,
+                            abs_path, facility_name, lat, lng, width_m, height_m,
+                            config["api_key"], config["validation_model"],
+                            config["validation_prompt"],
+                        )
+                    except Exception as e:
+                        if _is_fatal_ai_error(e):
+                            raise RuntimeError(f"OpenAI API account error: {e}") from e
+                        validation_error = str(e)
+                        logger.warning("Validation call failed: %s", e)
+
+                    if validation:
+                        scan.ai_validated = validation.approved
+                        scan.ai_facility_type = validation.facility_type
+                        scan.ai_notes = validation.notes
+                        if validation.approved:
+                            final_bbox = osm_bbox
+                            val_decision = f"APPROVED — AI confirmed OSM bbox covers the facility. Type: {validation.facility_type}"
+                            logger.info("AI approved OSM bbox")
+                        else:
+                            val_decision = f"REJECTED — {validation.reason}. Falling through to AI vision."
+                            logger.info("AI rejected OSM bbox: %s", validation.reason)
+                            method = None
                     else:
-                        val_decision = f"REJECTED — {validation.reason}. Falling through to AI vision."
-                        logger.info("AI rejected OSM bbox: %s", validation.reason)
-                        method = None
+                        final_bbox = osm_bbox
+                        val_decision = f"AI validation failed: {validation_error or 'unknown error'}. Using OSM bbox as fallback."
+                        logger.warning("Validation call failed, using OSM bbox anyway")
                 else:
                     final_bbox = osm_bbox
-                    val_decision = f"AI validation failed: {validation_error or 'unknown error'}. Using OSM bbox as fallback."
-                    logger.warning("Validation call failed, using OSM bbox anyway")
+                    val_decision = "BBox AI validation disabled in settings. Using OSM/MSFT bbox directly."
+                    logger.info("BBox AI validation disabled, using bbox directly")
+
+                ai_elapsed = int((time.monotonic() - ai_start) * 1000)
 
                 await _record_step(
                     db, scan_id, step_num, "ai_validation",
-                    status="completed",
+                    status="skipped" if not config["bbox_validation_enabled"] else "completed",
                     started_at=step_started,
                     completed_at=datetime.now(timezone.utc),
                     duration_ms=ai_elapsed,
@@ -499,6 +488,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         "overview_zoom": overview_zoom,
                         "overview_image": f"{ov_img.width}x{ov_img.height}px",
                         "model": config["validation_model"],
+                        "msft_polygons_px": msft_polygons_px,
                     }),
                     output_summary=json.dumps({
                         "approved": validation.approved if validation else None,
@@ -508,7 +498,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         "error": validation_error,
                     }),
                     decision=val_decision,
-                    ai_model=config["validation_model"],
+                    ai_model=config["validation_model"] if config["bbox_validation_enabled"] else None,
                     ai_prompt=validation.prompt_text if validation else None,
                     ai_response_raw=validation.raw_response if validation else None,
                     ai_tokens_prompt=validation.usage.prompt_tokens if validation and validation.usage else None,

@@ -113,6 +113,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         verification_model=settings_dict.get("verification_model", ""),
         correction_mode=settings_dict.get("correction_mode", ""),
         verification_correction_prompt=settings_dict.get("verification_correction_prompt", ""),
+        bbox_validation_enabled=settings_dict.get("bbox_validation_enabled", "true"),
     )
 
 
