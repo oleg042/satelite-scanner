@@ -55,6 +55,9 @@ async def _init_db():
             "ALTER TYPE scan_method ADD VALUE IF NOT EXISTS 'msft_buildings'"
         ))
         await conn.execute(text(
+            "ALTER TYPE scan_method ADD VALUE IF NOT EXISTS 'overture_buildings'"
+        ))
+        await conn.execute(text(
             "ALTER TYPE screenshot_type ADD VALUE IF NOT EXISTS 'msft_overlay'"
         ))
         await conn.close()

@@ -360,6 +360,28 @@
           </div>
         </div>
 
+        <!-- Building Footprint Provider -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Building Footprints</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Provider</label>
+              <select id="set-building-footprint-provider"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="msft">Microsoft Buildings (default)</option>
+                <option value="overture">Overture Maps (2.3B buildings)</option>
+              </select>
+              <p class="text-xs text-gray-600 mt-1">MSFT: 1.4B buildings, GeoJSONL. Overture: 2.3B, MSFT+Google+OSM merged.</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Overture Release</label>
+              <input id="set-overture-release" type="text" placeholder="2025-01-22.0"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Only used when provider is Overture. Check overturemaps.org for releases.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Scan Defaults -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Scan Defaults</h3>
@@ -736,7 +758,7 @@ function openImageModal(url, label, overlayData, msftData) {
   if (overlayData || msftData) {
     img.onload = function() {
       if (overlayData) drawBoundaryOverlay(img, overlayData.bbox, overlayData.origW, overlayData.origH);
-      if (msftData) drawMsftOverlay(img, msftData.polygons, msftData.origW, msftData.origH);
+      if (msftData) drawMsftOverlay(img, msftData.polygons, msftData.origW, msftData.origH, msftData.targetMask);
     };
   }
 
@@ -785,7 +807,7 @@ function drawBoundaryOverlay(imgEl, pixelBbox, origWidth, origHeight) {
 }
 
 // --- MSFT polygon overlay ---
-function drawMsftOverlay(imgEl, polygons, origWidth, origHeight) {
+function drawMsftOverlay(imgEl, polygons, origWidth, origHeight, targetMask) {
   const container = imgEl.closest('.bbox-overlay-container');
   if (!container) return;
   container.querySelectorAll('.msft-overlay').forEach(el => el.remove());
@@ -793,19 +815,27 @@ function drawMsftOverlay(imgEl, polygons, origWidth, origHeight) {
   const rW = imgEl.clientWidth, rH = imgEl.clientHeight;
   if (!rW || !rH) return;
   const scaleX = rW / origWidth, scaleY = rH / origHeight;
+  const mask = targetMask || [];
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'msft-overlay');
   svg.setAttribute('width', rW);
   svg.setAttribute('height', rH);
 
-  polygons.forEach(pts => {
+  polygons.forEach((pts, i) => {
+    const isTarget = mask[i] === true;
     const points = pts.map(([x, y]) => `${x * scaleX},${y * scaleY}`).join(' ');
     const pg = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     pg.setAttribute('points', points);
-    pg.setAttribute('fill', 'rgba(0,120,255,0.3)');
-    pg.setAttribute('stroke', 'rgba(0,120,255,0.7)');
-    pg.setAttribute('stroke-width', '2');
+    if (isTarget) {
+      pg.setAttribute('fill', 'rgba(0,200,80,0.35)');
+      pg.setAttribute('stroke', 'rgba(0,200,80,0.9)');
+      pg.setAttribute('stroke-width', '3');
+    } else {
+      pg.setAttribute('fill', 'rgba(0,120,255,0.12)');
+      pg.setAttribute('stroke', 'rgba(0,120,255,0.35)');
+      pg.setAttribute('stroke-width', '1');
+    }
     svg.appendChild(pg);
   });
 
@@ -850,7 +880,8 @@ function renderDetail(scan) {
             msftData = {
               polygons: valStep.input_summary.msft_polygons_px,
               origW: parseInt(dimMatch[1]),
-              origH: parseInt(dimMatch[2])
+              origH: parseInt(dimMatch[2]),
+              targetMask: valStep.input_summary.msft_target_mask || []
             };
           }
         }
@@ -869,17 +900,18 @@ function renderDetail(scan) {
         }
         if (msftData) {
           const msftJson = JSON.stringify(msftData.polygons).replace(/"/g, '&quot;');
-          onloadCalls += `drawMsftOverlay(this, ${msftJson}, ${msftData.origW}, ${msftData.origH});`;
+          const maskJson = JSON.stringify(msftData.targetMask || []).replace(/"/g, '&quot;');
+          onloadCalls += `drawMsftOverlay(this, ${msftJson}, ${msftData.origW}, ${msftData.origH}, ${maskJson});`;
         }
         let badges = '';
         if (overlayData) badges += ' <span class="text-red-400">■</span> AI boundary';
-        if (msftData) badges += ' <span class="text-blue-400">■</span> MSFT polygons';
+        if (msftData) badges += ' <span class="text-green-400">■</span> target <span class="text-blue-400">■</span> context';
         html += `<div class="text-center">
           <div class="relative inline-block bbox-overlay-container cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', ${overlayArg}, ${msftArg})" title="Click to enlarge">
               <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors"
                 onload="${onloadCalls}">
           </div>
-          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}${badges}</div>
+          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}${badges ? '<br>' + badges : ''}</div>
         </div>`;
       } else {
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null, null)" title="Click to enlarge">
@@ -1225,6 +1257,8 @@ async function loadSettings() {
     document.getElementById('set-correction-mode').value = s.correction_mode || 'v1';
     document.getElementById('set-verification-correction-prompt').value = s.verification_correction_prompt || '';
     document.getElementById('set-bbox-validation').checked = (s.bbox_validation_enabled || 'true') === 'true';
+    document.getElementById('set-building-footprint-provider').value = s.building_footprint_provider || 'msft';
+    document.getElementById('set-overture-release').value = s.overture_release || '';
   } catch {}
 }
 
@@ -1269,6 +1303,10 @@ async function saveSettings(e) {
   const vcp = document.getElementById('set-verification-correction-prompt').value.trim();
   if (vcp) body.verification_correction_prompt = vcp;
   body.bbox_validation_enabled = document.getElementById('set-bbox-validation').checked ? 'true' : 'false';
+  const bfp = document.getElementById('set-building-footprint-provider').value.trim();
+  if (bfp) body.building_footprint_provider = bfp;
+  const orel = document.getElementById('set-overture-release').value.trim();
+  if (orel) body.overture_release = orel;
 
   if (Object.keys(body).length === 0) {
     toast('No changes to save', 'error');

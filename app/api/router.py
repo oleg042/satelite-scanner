@@ -114,6 +114,8 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         correction_mode=settings_dict.get("correction_mode", ""),
         verification_correction_prompt=settings_dict.get("verification_correction_prompt", ""),
         bbox_validation_enabled=settings_dict.get("bbox_validation_enabled", "true"),
+        building_footprint_provider=settings_dict.get("building_footprint_provider", ""),
+        overture_release=settings_dict.get("overture_release", ""),
     )
 
 

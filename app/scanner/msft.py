@@ -96,36 +96,44 @@ async def _stream_and_filter(
 
             geom = feature.get("geometry", {})
             coords_raw = geom.get("coordinates", [])
-            if not coords_raw or geom.get("type") != "Polygon":
+            geom_type = geom.get("type")
+            if not coords_raw:
                 continue
 
-            # GeoJSON: [lng, lat] — take outer ring only
-            ring = coords_raw[0]
-            # Quick centroid check before expensive point-in-polygon
-            sum_lat = 0.0
-            sum_lng = 0.0
-            for pt in ring:
-                sum_lng += pt[0]
-                sum_lat += pt[1]
-            n = len(ring)
-            c_lat = sum_lat / n
-            c_lng = sum_lng / n
-
-            if abs(c_lat - lat) > radius_deg * 2 or abs(c_lng - lng) > radius_deg * 2:
+            # Extract outer rings — handle both Polygon and MultiPolygon
+            if geom_type == "Polygon":
+                rings = [coords_raw[0]]
+            elif geom_type == "MultiPolygon":
+                rings = [poly[0] for poly in coords_raw]  # outer ring of each polygon
+            else:
                 continue
-
-            # Flip [lng, lat] → (lat, lng) tuples for consistency with OSM
-            coords = [(pt[1], pt[0]) for pt in ring]
 
             props = feature.get("properties", {})
             height = props.get("height", -1)
 
-            buildings.append({
-                "id": idx,
-                "tags": {"height": height} if height > 0 else {},
-                "coords": coords,
-            })
-            idx += 1
+            for ring in rings:
+                # Quick centroid check before expensive point-in-polygon
+                sum_lat = 0.0
+                sum_lng = 0.0
+                for pt in ring:
+                    sum_lng += pt[0]
+                    sum_lat += pt[1]
+                n = len(ring)
+                c_lat = sum_lat / n
+                c_lng = sum_lng / n
+
+                if abs(c_lat - lat) > radius_deg * 2 or abs(c_lng - lng) > radius_deg * 2:
+                    continue
+
+                # Flip [lng, lat] → (lat, lng) tuples for consistency with OSM
+                coords = [(pt[1], pt[0]) for pt in ring]
+
+                buildings.append({
+                    "id": idx,
+                    "tags": {"height": height} if height > 0 else {},
+                    "coords": coords,
+                })
+                idx += 1
 
     except Exception as e:
         logger.warning("MSFT tile stream/filter failed: %s", e)
@@ -181,64 +189,17 @@ def _building_area(b: dict, ref_lat: float) -> float:
     )
 
 
-_MERGE_GAP_M = 15
-
-
-def _bbox_gap_m(a: dict, b: dict, ref_lat: float) -> float:
-    """Minimum gap (m) between two buildings' bounding boxes. 0 if they overlap."""
-    a_lats = [c[0] for c in a["coords"]]
-    a_lngs = [c[1] for c in a["coords"]]
-    b_lats = [c[0] for c in b["coords"]]
-    b_lngs = [c[1] for c in b["coords"]]
-
-    lat_gap = max(0, max(min(a_lats), min(b_lats)) - min(max(a_lats), max(b_lats)))
-    lng_gap = max(0, max(min(a_lngs), min(b_lngs)) - min(max(a_lngs), max(b_lngs)))
-
-    return math.sqrt((lat_gap * M_PER_DEG_LAT) ** 2 + (lng_gap * meters_per_deg_lng(ref_lat)) ** 2)
-
-
-def _merge_adjacent(seed: dict, all_buildings: list[dict], ref_lat: float) -> dict:
-    """Flood-fill merge: starting from seed, absorb buildings within _MERGE_GAP_M."""
-    merged_ids = {seed["id"]}
-    merged_coords = list(seed["coords"])
-    cluster = [seed]
-
-    changed = True
-    while changed:
-        changed = False
-        for b in all_buildings:
-            if b["id"] in merged_ids:
-                continue
-            for m in cluster:
-                if _bbox_gap_m(m, b, ref_lat) <= _MERGE_GAP_M:
-                    merged_ids.add(b["id"])
-                    merged_coords.extend(b["coords"])
-                    cluster.append(b)
-                    changed = True
-                    break
-
-    if len(merged_ids) > 1:
-        logger.info("MSFT: merged %d adjacent polygons (ids: %s)", len(merged_ids), list(merged_ids))
-
-    return {
-        "id": seed["id"],
-        "tags": seed.get("tags", {}),
-        "coords": merged_coords,
-    }
-
-
 def find_target_building(
     buildings: list[dict], target_lat: float, target_lng: float
 ) -> dict | None:
     """Find the facility's building near the target point.
 
-    Seed selection:
+    Selection:
     - If pin is inside a building → use it
     - If not → use the LARGEST building within range (not nearest — the
       main building is what the user is pointing at)
 
-    Then flood-fill merge adjacent polygons within 15m gap to capture
-    connected sections (loading docks, walkways, split polygons).
+    Returns the single best-matching building (no merge).
     """
     seed = None
 
@@ -267,4 +228,4 @@ def find_target_building(
         seed, seed_dist, seed_area = candidates[0]
         logger.info("MSFT: selected largest building %d (~%.0f m², %.0fm from pin)", seed["id"], seed_area, seed_dist)
 
-    return _merge_adjacent(seed, buildings, target_lat)
+    return seed

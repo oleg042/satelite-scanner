@@ -9,3 +9,4 @@ httpx
 openai
 aiofiles
 playwright
+duckdb

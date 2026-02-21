@@ -36,6 +36,7 @@ from app.scanner.msft import (
     find_target_building as find_target_building_msft,
     query_msft_buildings,
 )
+from app.scanner.overture import query_overture_buildings
 from app.scanner.osm import (
     find_target_building,
     find_target_landuse,
@@ -92,6 +93,8 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     correction_mode = await _get_setting(db, "correction_mode", "v1")
     verification_correction_prompt = await _get_setting(db, "verification_correction_prompt", "")
     bbox_validation_enabled = (await _get_setting(db, "bbox_validation_enabled", "true")).lower() == "true"
+    building_provider = await _get_setting(db, "building_footprint_provider", "msft")
+    overture_release = await _get_setting(db, "overture_release", "2025-01-22.0")
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -106,6 +109,8 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "correction_mode": correction_mode,
         "verification_correction_prompt": verification_correction_prompt,
         "bbox_validation_enabled": bbox_validation_enabled,
+        "building_provider": building_provider,
+        "overture_release": overture_release,
     }
 
 
@@ -291,26 +296,36 @@ async def run_pipeline(scan_id, db: AsyncSession):
     step_num = 0
     osm_bbox = None  # shared variable — set by MSFT or OSM, consumed by AI validation
     msft_buildings = []  # hoisted — populated by step 1, used by step 3 for overlay
+    msft_target_ids = set()  # tracks which building(s) are the selected target
 
     try:
-        # ── STEP 1: MICROSOFT BUILDINGS CHECK ─────────────────────
+        # ── STEP 1: BUILDING FOOTPRINT CHECK ──────────────────────
         step_num += 1
         scan.status = ScanStatus.running_msft
         await db.commit()
 
+        building_provider = config["building_provider"]
         msft_start = time.monotonic()
-        msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
+
+        if building_provider == "overture":
+            msft_buildings = await query_overture_buildings(
+                lat, lng, settings.search_radius_m, release=config["overture_release"]
+            )
+        else:
+            msft_buildings = await query_msft_buildings(lat, lng, settings.search_radius_m)
+
         msft_decision = None
         msft_building_info = None
 
         if msft_buildings:
             building = find_target_building_msft(msft_buildings, lat, lng)
             if building:
+                msft_target_ids = {building["id"]}
                 lats = [c[0] for c in building["coords"]]
                 lngs = [c[1] for c in building["coords"]]
                 raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))
                 osm_bbox = bbox_add_buffer(*raw_bbox, buffer_m)
-                method = ScanMethod.msft_buildings
+                method = ScanMethod.overture_buildings if building_provider == "overture" else ScanMethod.msft_buildings
                 msft_building_info = {
                     "coord_count": len(building["coords"]),
                     "raw_bbox": list(raw_bbox),
@@ -323,14 +338,16 @@ async def run_pipeline(scan_id, db: AsyncSession):
             msft_decision = "No MSFT buildings found (no data for region or query failed)."
 
         msft_elapsed = int((time.monotonic() - msft_start) * 1000)
+        step_name = "overture_buildings_check" if building_provider == "overture" else "msft_buildings_check"
         await _record_step(
-            db, scan_id, step_num, "msft_buildings_check",
+            db, scan_id, step_num, step_name,
             status="completed",
             duration_ms=msft_elapsed,
             input_summary=json.dumps({
                 "lat": lat,
                 "lng": lng,
                 "search_radius_m": settings.search_radius_m,
+                "provider": building_provider,
             }),
             output_summary=json.dumps({
                 "buildings_found": len(msft_buildings),
@@ -425,12 +442,15 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
                 # Compute MSFT polygon pixel coords for frontend overlay
                 msft_polygons_px = None
+                msft_target_mask = None
                 if msft_buildings and ov_grid:
                     msft_polygons_px = []
+                    msft_target_mask = []
                     for b in msft_buildings:
-                        pixels = [list(latlng_to_pixel(lat, lng, ov_grid)) for lat, lng in b["coords"]]
+                        pixels = [list(latlng_to_pixel(blat, blng, ov_grid)) for blat, blng in b["coords"]]
                         if len(pixels) >= 3:
                             msft_polygons_px.append(pixels)
+                            msft_target_mask.append(b["id"] in msft_target_ids)
 
                 width_m, height_m = bbox_dimensions_m(*osm_bbox)
 
@@ -489,6 +509,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                         "overview_image": f"{ov_img.width}x{ov_img.height}px",
                         "model": config["validation_model"],
                         "msft_polygons_px": msft_polygons_px,
+                        "msft_target_mask": msft_target_mask if msft_polygons_px else None,
                     }),
                     output_summary=json.dumps({
                         "approved": validation.approved if validation else None,

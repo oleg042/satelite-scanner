@@ -49,6 +49,8 @@ class SettingsUpdate(BaseModel):
     correction_mode: Optional[str] = None
     verification_correction_prompt: Optional[str] = None
     bbox_validation_enabled: Optional[str] = None
+    building_footprint_provider: Optional[str] = None
+    overture_release: Optional[str] = None
 
 
 # --- Responses ---
@@ -125,6 +127,8 @@ class SettingsResponse(BaseModel):
     correction_mode: str = ""
     verification_correction_prompt: str = ""
     bbox_validation_enabled: str = ""
+    building_footprint_provider: str = ""
+    overture_release: str = ""
 
 
 class ScanStepResponse(BaseModel):

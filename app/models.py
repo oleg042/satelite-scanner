@@ -43,6 +43,7 @@ class ScanMethod(str, enum.Enum):
     osm_landuse = "osm_landuse"
     ai_vision = "ai_vision"
     msft_buildings = "msft_buildings"
+    overture_buildings = "overture_buildings"
     skipped = "skipped"
 
 
