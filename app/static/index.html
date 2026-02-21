@@ -265,17 +265,7 @@
 
         <!-- Models -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <span class="text-sm text-gray-300">BBox AI Validation</span>
-              <div class="relative">
-                <input id="set-bbox-validation" type="checkbox" class="sr-only peer">
-                <div class="w-9 h-5 bg-gray-700 rounded-full peer-checked:bg-blue-600 transition-colors"></div>
-                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
-              </div>
-            </label>
-          </div>
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label class="block text-sm text-gray-300 mb-1.5">Validation Model</label>
@@ -354,6 +344,18 @@
                 <option value="v2">V2 — Single-agent (verify + correct in one call)</option>
               </select>
               <p class="text-xs text-gray-600 mt-1">V2 saves 1 API call per retry and eliminates handoff loss</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">BBox AI Validation</label>
+              <label class="flex items-center gap-2 cursor-pointer mt-2">
+                <div class="relative">
+                  <input id="set-bbox-validation" type="checkbox" class="sr-only peer">
+                  <div class="w-9 h-5 bg-gray-700 rounded-full peer-checked:bg-blue-600 transition-colors"></div>
+                  <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                </div>
+                <span class="text-sm text-gray-400">Enable</span>
+              </label>
+              <p class="text-xs text-gray-600 mt-1">AI validates bbox accuracy after boundary detection</p>
             </div>
           </div>
         </div>
