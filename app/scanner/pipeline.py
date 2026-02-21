@@ -1283,6 +1283,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     started_at=bin_step_started,
                     completed_at=bin_completed,
                     duration_ms=bin_elapsed,
+                    ai_prompt=config["bin_detection_prompt"],
                     input_summary=json.dumps({
                         "chunk_count": bin_result.chunks_total,
                         "model": config["bin_detection_model"],

@@ -310,6 +310,10 @@ async def run_bin_detection(
             chunk_results.append({
                 "col": chunk["col"], "row": chunk["row"],
                 "status": "failed", "error": result.get("error"),
+                "raw_response": None,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
             })
             continue
 
@@ -328,6 +332,10 @@ async def run_bin_detection(
             "overall_confidence": chunk_confidence,
             "bins": chunk_bins,
             "notes": parsed.get("notes", []),
+            "raw_response": result.get("raw_response", ""),
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "total_tokens": result.get("total_tokens", 0),
         }
         chunk_results.append(chunk_result)
 

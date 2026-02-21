@@ -1087,30 +1087,17 @@ function renderDetail(scan) {
     html += '</div>';
   }
 
-  // Bin detection summary
-  if (scan.bin_detection_status) {
-    html += '<div class="bg-gray-900 rounded-lg px-4 py-3 text-sm">';
-    html += '<div class="flex items-center gap-3">';
-    html += '<span class="text-xs font-semibold uppercase tracking-wide text-gray-400">Bin Detection</span>';
-    const bds = scan.bin_detection_status;
-    const bdsColor = bds === 'completed' ? 'text-green-400' : bds === 'partial' ? 'text-yellow-400' : 'text-red-400';
-    html += `<span class="text-xs ${bdsColor}">${bds}</span>`;
-    html += '</div>';
-    if (scan.bin_present) {
-      html += `<div class="mt-1 text-gray-300">${scan.bin_count} bin${scan.bin_count !== 1 ? 's' : ''} detected`;
-      html += ` (${scan.bin_filled_count || 0} filled, ${scan.bin_empty_count || 0} empty)`;
-      html += ` — confidence: ${scan.bin_confidence}%</div>`;
-    } else {
-      html += '<div class="mt-1 text-gray-500">No bins detected</div>';
-    }
-    html += '</div>';
-  }
-
   if (trace && trace.steps) {
+    // Split steps into pipeline (1-6) and bin detection (7-8)
+    const pipelineSteps = trace.steps.filter(s => !['image_chunking', 'bin_detection'].includes(s.step_name));
+    const binSteps = trace.steps.filter(s => ['image_chunking', 'bin_detection'].includes(s.step_name));
+
+    // --- Pipeline Trace (steps 1-6) ---
+    if (pipelineSteps.length > 0) {
     html += '<details class="text-xs">';
     html += '<summary class="text-xs font-semibold uppercase tracking-wide text-gray-400 cursor-pointer hover:text-gray-300">Pipeline Trace</summary>';
     html += '<div class="space-y-2 mt-2">';
-    trace.steps.forEach(step => {
+    pipelineSteps.forEach(step => {
       const dur = step.duration_ms != null ? `(${(step.duration_ms / 1000).toFixed(1)}s)` : '';
       const dec = step.decision || '';
       const stepColor = step.status === 'failed' ? 'text-red-400' : 'text-green-400';
@@ -1228,6 +1215,154 @@ function renderDetail(scan) {
       html += `<div class="text-xs text-gray-400 mt-1">Total AI tokens: <span class="text-gray-200 font-medium">${trace.total_ai_tokens.toLocaleString()}</span></div>`;
     }
     html += '</div></details>';
+    }
+
+    // --- Bin Detection Trace (steps 7-8) ---
+    if (binSteps.length > 0) {
+      const chunkingStep = binSteps.find(s => s.step_name === 'image_chunking');
+      const binStep = binSteps.find(s => s.step_name === 'bin_detection');
+
+      // Extract grid info from image_chunking step
+      const chunkOut = chunkingStep && chunkingStep.output_summary ? chunkingStep.output_summary : {};
+      const gridLabel = chunkOut.grid || '?';
+      const chunkCount = chunkOut.chunk_count || 0;
+      const chunkInput = chunkingStep && chunkingStep.input_summary ? chunkingStep.input_summary : {};
+      const maxChunkM = chunkInput.max_chunk_m || '?';
+
+      // Extract bin detection info
+      const binOut = binStep && binStep.output_summary ? binStep.output_summary : {};
+      const chunkResults = binOut.chunk_results || [];
+      const totalBins = binOut.total_bins || 0;
+      const binTokensTotal = binStep ? (binStep.ai_tokens_total || 0) : 0;
+      const binDur = binStep && binStep.duration_ms != null ? (binStep.duration_ms / 1000).toFixed(1) : '?';
+      const binModel = binStep ? (binStep.ai_model || '?') : '?';
+      const bds = scan.bin_detection_status;
+      const bdsColor = bds === 'completed' ? 'text-green-400' : bds === 'partial' ? 'text-yellow-400' : bds === 'failed' ? 'text-red-400' : 'text-gray-400';
+
+      html += '<details class="text-xs" open>';
+      html += '<summary class="text-xs font-semibold uppercase tracking-wide text-gray-400 cursor-pointer hover:text-gray-300">Bin Detection Trace</summary>';
+      html += '<div class="space-y-2 mt-2">';
+
+      // Header: grid summary + overall stats + bin summary (replaces standalone bin detection summary)
+      html += '<div class="bg-gray-900 rounded px-3 py-2 text-sm">';
+      html += `<div class="flex items-center gap-3 flex-wrap">`;
+      html += `<span class="text-gray-300">Grid: <span class="text-gray-100 font-medium">${esc(gridLabel)}</span> = ${chunkCount} chunks (${esc(String(maxChunkM))}m)</span>`;
+      html += `<span class="text-gray-500">|</span>`;
+      html += `<span class="text-gray-300">${totalBins} bin${totalBins !== 1 ? 's' : ''} detected</span>`;
+      html += `<span class="text-gray-500">|</span>`;
+      html += `<span class="text-gray-300">${binTokensTotal.toLocaleString()} tokens</span>`;
+      html += `<span class="text-gray-500">|</span>`;
+      html += `<span class="text-gray-300">${binDur}s</span>`;
+      html += `<span class="text-gray-500">|</span>`;
+      html += `<span class="text-gray-300">Model: ${esc(binModel)}</span>`;
+      html += `<span class="text-gray-500">|</span>`;
+      html += `<span class="${bdsColor}">${esc(bds || 'unknown')}</span>`;
+      html += '</div>';
+      if (scan.bin_present) {
+        html += `<div class="mt-1 text-gray-400">${scan.bin_count} bin${scan.bin_count !== 1 ? 's' : ''}`;
+        html += ` (${scan.bin_filled_count || 0} filled, ${scan.bin_empty_count || 0} empty)`;
+        html += ` — confidence: ${scan.bin_confidence}%</div>`;
+      } else if (bds) {
+        html += '<div class="mt-1 text-gray-500">No bins detected</div>';
+      }
+      html += '</div>';
+
+      // Per-chunk rows
+      chunkResults.forEach(cr => {
+        const label = `c${cr.col}r${cr.row}`;
+        if (cr.status === 'failed') {
+          // Failed chunk
+          html += `<details class="text-xs">`;
+          html += `<summary class="cursor-pointer hover:text-gray-300 text-gray-400 bg-gray-900 rounded px-3 py-1">`;
+          html += `<span class="text-red-400 font-medium">${esc(label)}: FAILED</span>`;
+          html += `</summary>`;
+          html += `<div class="mt-1 bg-gray-950 rounded p-2 text-red-400">Error: ${esc(cr.error || 'Unknown error')}</div>`;
+          html += `</details>`;
+          return;
+        }
+
+        // Successful chunk
+        const crBins = cr.bins || [];
+        const crNotes = cr.notes || [];
+        const crTokens = cr.total_tokens || 0;
+        const crConfs = crBins.map(b => b.confidence || 0);
+        const confStr = crConfs.length ? ` (conf ${crConfs.join('%, ')}%)` : '';
+        const binCountStr = cr.total_bins || 0;
+
+        html += `<details class="text-xs">`;
+        html += `<summary class="cursor-pointer hover:text-gray-300 text-gray-400 bg-gray-900 rounded px-3 py-1">`;
+        html += `<span class="font-medium text-gray-300">${esc(label)}</span>: `;
+        if (binCountStr > 0) {
+          html += `<span class="text-green-400">${binCountStr} bin${binCountStr !== 1 ? 's' : ''}${confStr}</span>`;
+        } else {
+          html += `<span class="text-gray-500">0 bins</span>`;
+        }
+        html += ` — <span class="text-gray-500">${crTokens.toLocaleString()} tokens</span>`;
+        html += `</summary>`;
+        html += `<div class="mt-1 bg-gray-950 rounded p-3 text-gray-400 space-y-2">`;
+
+        // Parsed AI output
+        html += `<div>bin_present: <span class="${cr.bin_present ? 'text-green-400' : 'text-gray-500'}">${cr.bin_present}</span></div>`;
+        html += `<div>total_bins: ${cr.total_bins || 0}</div>`;
+
+        // Per-bin details
+        if (crBins.length > 0) {
+          crBins.forEach((bin, i) => {
+            html += `<div class="border-l-2 border-gray-700 pl-3 ml-1">`;
+            html += `<div class="text-gray-300 font-medium">Bin ${i + 1}:</div>`;
+            html += `<div>region: ${esc(bin.region || '-')}, fill: <span class="${bin.fill_status === 'filled_or_partial' ? 'text-yellow-400' : 'text-gray-500'}">${esc(bin.fill_status || '-')}</span>, conf: ${bin.confidence || 0}%</div>`;
+            if (bin.evidence) html += `<div class="text-gray-500 italic">evidence: "${esc(bin.evidence)}"</div>`;
+            if (bin.bbox_relative) {
+              const bb = bin.bbox_relative;
+              html += `<div class="text-gray-600">bbox: x=${bb.x}, y=${bb.y}, w=${bb.w}, h=${bb.h}</div>`;
+            }
+            html += `</div>`;
+          });
+        }
+
+        // Notes (near-misses)
+        if (crNotes.length > 0) {
+          html += `<div class="border-t border-gray-800 pt-1 mt-1">`;
+          html += `<div class="text-gray-500 font-medium">Notes (near-misses):</div>`;
+          crNotes.forEach(n => {
+            html += `<div class="ml-2 text-gray-400">• ${esc(typeof n === 'string' ? n : JSON.stringify(n))}</div>`;
+          });
+          html += `</div>`;
+        }
+
+        // Raw AI Response (collapsible)
+        if (cr.raw_response) {
+          html += `<details class="text-xs border-t border-gray-800 pt-1 mt-1"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">Raw AI Response</summary>`;
+          html += `<pre class="mt-1 bg-gray-900 rounded p-2 text-gray-400 overflow-x-auto max-h-48 text-xs">${esc(cr.raw_response)}</pre></details>`;
+        }
+
+        // Token breakdown
+        if (crTokens > 0) {
+          html += `<div class="text-gray-600 text-xs">Tokens: ${(cr.prompt_tokens || 0).toLocaleString()}p + ${(cr.completion_tokens || 0).toLocaleString()}c = ${crTokens.toLocaleString()} total</div>`;
+        }
+
+        html += `</div></details>`;
+      });
+
+      // Aggregated notes across all chunks
+      const allNotes = binOut.notes || [];
+      if (allNotes.length > 0) {
+        html += `<div class="bg-gray-900 rounded px-3 py-2 text-sm">`;
+        html += `<div class="text-gray-500 font-medium text-xs">All Notes:</div>`;
+        allNotes.forEach(n => {
+          html += `<div class="text-gray-400 text-xs ml-2">${esc(typeof n === 'string' ? n : JSON.stringify(n))}</div>`;
+        });
+        html += `</div>`;
+      }
+
+      // AI Prompt used (collapsible)
+      if (binStep && binStep.ai_prompt) {
+        html += `<details class="text-xs"><summary class="cursor-pointer hover:text-gray-300 text-gray-500">Bin Detection Prompt (click to view)</summary>`;
+        html += `<pre class="mt-1 bg-gray-950 rounded p-2 text-gray-400 overflow-x-auto max-h-64 text-xs">${esc(binStep.ai_prompt)}</pre></details>`;
+      }
+
+      html += '</div></details>';
+    }
   } else if (!trace) {
     html += '<div class="text-sm text-gray-500">Loading trace...</div>';
   }
