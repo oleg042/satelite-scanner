@@ -804,9 +804,10 @@ function renderDetail(scan) {
           <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr} <span class="text-red-400">■</span> AI boundary</div>
         </div>`;
       } else {
+        const msftBadge = ss.type === 'msft_overlay' ? ' <span class="text-blue-400">■</span> MSFT polygons' : '';
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null)" title="Click to enlarge">
             <img src="${thumbSrc}" alt="${esc(ss.type)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}</div>
+          <div class="text-xs text-gray-500 mt-1">${esc(ss.type)} (z${ss.zoom || '?'})${sizeStr}${msftBadge}</div>
         </div>`;
       }
     });

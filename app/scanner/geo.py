@@ -67,6 +67,20 @@ def pixel_to_latlng(
     return lat, lng
 
 
+def latlng_to_pixel(
+    lat: float, lng: float, grid_info: dict
+) -> tuple[int, int]:
+    """Convert lat/lng to pixel coordinates in a stitched image (inverse of pixel_to_latlng)."""
+    zoom = grid_info["zoom"]
+    nw_lat, nw_lng = tile_to_lat_lng(grid_info["tile_min_x"], grid_info["tile_min_y"], zoom)
+    se_lat, se_lng = tile_to_lat_lng(
+        grid_info["tile_max_x"] + 1, grid_info["tile_max_y"] + 1, zoom
+    )
+    px = int((lng - nw_lng) / (se_lng - nw_lng) * grid_info["full_w"])
+    py = int((nw_lat - lat) / (nw_lat - se_lat) * grid_info["full_h"])
+    return px, py
+
+
 def bbox_dimensions_m(
     min_lat: float, min_lng: float, max_lat: float, max_lng: float
 ) -> tuple[float, float]:

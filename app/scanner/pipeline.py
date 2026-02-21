@@ -28,6 +28,7 @@ from app.scanner.geo import (
     M_PER_DEG_LAT,
     bbox_add_buffer,
     bbox_dimensions_m,
+    latlng_to_pixel,
     meters_per_deg_lng,
     pixel_to_latlng,
 )
@@ -176,6 +177,20 @@ async def _record_step(db: AsyncSession, scan_id, step_number: int, step_name: s
     return step
 
 
+def _draw_msft_overlay(ov_img, msft_buildings, grid_info):
+    """Draw MSFT building polygons on a copy of the overview image."""
+    from PIL import ImageDraw
+    overlay = ov_img.copy()
+    draw = ImageDraw.Draw(overlay, "RGBA")
+
+    for b in msft_buildings:
+        pixels = [latlng_to_pixel(lat, lng, grid_info) for lat, lng in b["coords"]]
+        if len(pixels) >= 3:
+            draw.polygon(pixels, fill=(0, 120, 255, 50), outline=(0, 120, 255, 200))
+
+    return overlay
+
+
 async def _downscale_overview(
     db: AsyncSession, scan_id, screenshot_type: ScreenshotType,
     abs_path: str, max_width: int = 1080,
@@ -287,6 +302,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
     method = None
     step_num = 0
     osm_bbox = None  # shared variable — set by MSFT or OSM, consumed by AI validation
+    msft_buildings = []  # hoisted — populated by step 1, used by step 3 for overlay
 
     try:
         # ── STEP 1: MICROSOFT BUILDINGS CHECK ─────────────────────
@@ -418,6 +434,20 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     filename, rel_path, abs_path, overview_zoom,
                     ov_img.width, ov_img.height,
                 )
+
+                # Draw MSFT building polygons overlay (QA/debug aid)
+                if msft_buildings and ov_grid:
+                    overlay_img = _draw_msft_overlay(ov_img, msft_buildings, ov_grid)
+                    ov_rel, ov_fn, ov_abs = _save_image(
+                        overlay_img, facility_name, "msft_overlay", overview_zoom, scan_id
+                    )
+                    await _record_screenshot(
+                        db, scan_id, ScreenshotType.msft_overlay,
+                        ov_fn, ov_rel, ov_abs, overview_zoom,
+                        overlay_img.width, overlay_img.height,
+                    )
+                    overlay_img.close()
+                    await _downscale_overview(db, scan_id, ScreenshotType.msft_overlay, ov_abs)
 
                 width_m, height_m = bbox_dimensions_m(*osm_bbox)
 

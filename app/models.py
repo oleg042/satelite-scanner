@@ -49,6 +49,7 @@ class ScanMethod(str, enum.Enum):
 class ScreenshotType(str, enum.Enum):
     overview = "overview"
     ai_overview = "ai_overview"
+    msft_overlay = "msft_overlay"
     final = "final"
 
 

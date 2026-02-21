@@ -54,6 +54,9 @@ async def _init_db():
         await conn.execute(text(
             "ALTER TYPE scan_method ADD VALUE IF NOT EXISTS 'msft_buildings'"
         ))
+        await conn.execute(text(
+            "ALTER TYPE screenshot_type ADD VALUE IF NOT EXISTS 'msft_overlay'"
+        ))
         await conn.close()
     except Exception as e:
         logger.info("Enum migration skipped (fresh DB or already done): %s", e)
