@@ -343,7 +343,10 @@ async def run_bin_detection(
 
         if chunk_bin_present and chunk_bins:
             chunks_with_bins += 1
-            confidences.append(chunk_confidence)
+            # Collect per-bin confidences for overall average
+            for b in chunk_bins:
+                if b.get("confidence"):
+                    confidences.append(b["confidence"])
 
             for bin_item in chunk_bins:
                 # Convert chunk-relative bbox to full-image-relative
@@ -379,9 +382,9 @@ async def run_bin_detection(
         elif isinstance(notes, str) and notes.strip():
             all_notes.append(f"[c{chunk['col']}r{chunk['row']}] {notes}")
 
-    # Overall confidence: minimum of per-chunk confidences (conservative)
+    # Overall confidence: average of per-bin confidences across all chunks
     if confidences:
-        overall_confidence = min(confidences)
+        overall_confidence = round(sum(confidences) / len(confidences))
     else:
         overall_confidence = 0
 
