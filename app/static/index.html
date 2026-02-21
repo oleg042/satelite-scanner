@@ -1298,14 +1298,20 @@ function renderDetail(scan) {
         const crNotes = cr.notes || [];
         const crTokens = cr.total_tokens || 0;
         const crConfs = crBins.map(b => b.confidence || 0);
-        const confStr = crConfs.length ? ` (conf ${crConfs.join('%, ')}%)` : '';
+        const crAvgConf = crConfs.length ? Math.round(crConfs.reduce((a, b) => a + b, 0) / crConfs.length) : 0;
         const binCountStr = cr.total_bins || 0;
+        const crFilled = cr.filled_or_partial_count || 0;
+        const crEmpty = cr.empty_or_unclear_count || 0;
+        const hasBins = binCountStr > 0;
 
         html += `<details class="text-xs">`;
         html += `<summary class="cursor-pointer hover:text-gray-300 text-gray-400 bg-gray-900 rounded px-3 py-1">`;
-        html += `<span class="font-medium text-gray-300">${esc(label)}</span>: `;
-        if (binCountStr > 0) {
-          html += `<span class="text-green-400">${binCountStr} bin${binCountStr !== 1 ? 's' : ''}${confStr}</span>`;
+        html += `<span class="font-medium ${hasBins ? 'text-green-400' : 'text-gray-300'}">${esc(label)}</span>: `;
+        if (hasBins) {
+          html += `<span class="text-gray-300">${binCountStr} bin${binCountStr !== 1 ? 's' : ''}</span>`;
+          html += ` <span class="text-yellow-400">${crFilled}F</span>`;
+          html += ` <span class="text-gray-500">${crEmpty}E</span>`;
+          html += ` <span class="text-gray-300">conf ${crAvgConf}%</span>`;
         } else {
           html += `<span class="text-gray-500">0 bins</span>`;
         }
