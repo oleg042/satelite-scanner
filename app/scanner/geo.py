@@ -47,7 +47,7 @@ def point_in_polygon(lat: float, lng: float, polygon_coords: list[tuple[float, f
     for i in range(n):
         yi, xi = polygon_coords[i]
         yj, xj = polygon_coords[j]
-        if ((yi > lng) != (yj > lng)) and (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi):
+        if ((yi > lat) != (yj > lat)) and (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi):
             inside = not inside
         j = i
     return inside
