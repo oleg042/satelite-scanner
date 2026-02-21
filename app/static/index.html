@@ -67,13 +67,13 @@
     <div class="border-b border-gray-800 bg-gray-900/50 px-6 py-4">
       <div class="flex items-start gap-6">
         <!-- New Scan form (inline) -->
-        <form id="scan-form" class="flex flex-wrap items-end gap-3 flex-1">
+        <form id="scan-form" class="flex flex-wrap items-end gap-3">
           <div class="w-56">
             <label class="block text-xs text-gray-500 mb-1">Facility Name</label>
             <input id="sf-name" type="text" placeholder="Amerequip Corporation" required
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
-          <div class="flex-1 min-w-[200px]">
+          <div class="w-56">
             <label class="block text-xs text-gray-500 mb-1">Address / Location</label>
             <input id="sf-location" type="text" placeholder="123 Main St, City, ST  or  Google Maps URL  or  41.05, -80.67" required
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
@@ -164,7 +164,6 @@
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
-              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Coords</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
@@ -726,13 +725,12 @@ function renderTable() {
       </td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
-      <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method, scan.facility_lat, scan.facility_lng)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="9" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="8" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
