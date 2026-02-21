@@ -12,12 +12,17 @@ class Settings(BaseSettings):
     default_buffer_m: int = 50
     overview_zoom: int = 19
     tile_delay_s: float = 0.05
-    tile_concurrency: int = 10
-    worker_concurrency: int = 3
-    stale_scan_timeout_minutes: int = 30
     search_radius_m: int = 200
     fallback_radius_m: int = 75
     overview_radius_m: int = 200
+
+    # ── Concurrency & Memory Limits ──────────────────────────
+    tile_concurrency: int = 10
+    worker_concurrency: int = 3
+    stale_scan_timeout_minutes: int = 30
+    heavy_phase_concurrency: int = 2    # max scans in tile+vision phase simultaneously
+    max_image_mb: int = 128             # PIL image size before chunked stitching kicks in
+    browser_concurrency: int = 2        # max concurrent Playwright browser contexts
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

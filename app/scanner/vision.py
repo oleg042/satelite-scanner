@@ -82,6 +82,7 @@ def _prepare_image_for_ai(image_path: str, max_long_side: int = 2048) -> tuple:
     resized.save(buf, format="PNG")
     resized.close()
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    buf.close()
 
     scale = orig_w / new_w
     logger.info("Pre-scaled image for AI: %dx%d → %dx%d (scale=%.3f)", orig_w, orig_h, new_w, new_h, scale)
@@ -304,6 +305,7 @@ def verify_facility_boundary(
         img.save(buf, format="PNG")
         img.close()
         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        buf.close()
 
         prompt = prompt_template.format(name=name)
 
@@ -411,6 +413,8 @@ def verify_and_correct_boundary(
             resized.save(buf2, format="PNG")
             resized.close()
             img_b64 = base64.b64encode(buf2.getvalue()).decode("utf-8")
+            buf.close()
+            buf2.close()
             scale = orig_w / new_w
             ai_w, ai_h = new_w, new_h
             prompt_top = round(boundary.top_y / scale)
@@ -419,6 +423,7 @@ def verify_and_correct_boundary(
             prompt_right = round(boundary.right_x / scale)
         else:
             img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            buf.close()
             scale = 1.0
             ai_w, ai_h = orig_w, orig_h
             prompt_top = boundary.top_y
@@ -616,6 +621,8 @@ def correct_facility_boundary(
             resized.save(buf2, format="PNG")
             resized.close()
             img_b64 = base64.b64encode(buf2.getvalue()).decode("utf-8")
+            buf.close()
+            buf2.close()
             scale = orig_w / new_w
             ai_w, ai_h = new_w, new_h
             # Scale boundary coords down for the prompt
@@ -625,6 +632,7 @@ def correct_facility_boundary(
             prompt_right = round(boundary.right_x / scale)
         else:
             img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            buf.close()
             scale = 1.0
             ai_w, ai_h = orig_w, orig_h
             prompt_top = boundary.top_y

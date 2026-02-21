@@ -167,7 +167,6 @@
               <th class="px-3 py-2.5 w-8"><input id="select-all" type="checkbox" class="rounded bg-gray-800 border-gray-600 cursor-pointer"></th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
-              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_address">Address</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
@@ -263,7 +262,46 @@
           </div>
         </div>
 
-        <!-- Models -->
+        <!-- Building Footprint Provider -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Building Footprints</h3>
+          <div>
+            <label class="block text-sm text-gray-300 mb-1.5">Provider</label>
+            <select id="set-building-footprint-provider"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <option value="msft">Microsoft Buildings (default)</option>
+              <option value="overture">Overture Maps (2.3B buildings)</option>
+            </select>
+            <p class="text-xs text-gray-600 mt-1">MSFT: 1.4B buildings, GeoJSONL. Overture: 2.3B, MSFT+Google+OSM merged.</p>
+          </div>
+        </div>
+
+        <!-- Scan Defaults -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Scan Defaults</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Default Zoom</label>
+              <input id="set-default-zoom" type="number" min="16" max="22"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Tile zoom for detail (16–22)</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Buffer (meters)</label>
+              <input id="set-buffer" type="number" min="10" max="500"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Padding around OSM bbox (10–500)</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Overview Zoom</label>
+              <input id="set-overview-zoom" type="number" min="16" max="21"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Zoom for AI validation images (16–21)</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Models -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">AI Models</h3>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -356,45 +394,6 @@
                 <span class="text-sm text-gray-400">Enable</span>
               </label>
               <p class="text-xs text-gray-600 mt-1">AI validates bbox accuracy after boundary detection</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Building Footprint Provider -->
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Building Footprints</h3>
-          <div>
-            <label class="block text-sm text-gray-300 mb-1.5">Provider</label>
-            <select id="set-building-footprint-provider"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-              <option value="msft">Microsoft Buildings (default)</option>
-              <option value="overture">Overture Maps (2.3B buildings)</option>
-            </select>
-            <p class="text-xs text-gray-600 mt-1">MSFT: 1.4B buildings, GeoJSONL. Overture: 2.3B, MSFT+Google+OSM merged.</p>
-          </div>
-        </div>
-
-        <!-- Scan Defaults -->
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Scan Defaults</h3>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label class="block text-sm text-gray-300 mb-1.5">Default Zoom</label>
-              <input id="set-default-zoom" type="number" min="16" max="22"
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-              <p class="text-xs text-gray-600 mt-1">Tile zoom for detail (16–22)</p>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-300 mb-1.5">Buffer (meters)</label>
-              <input id="set-buffer" type="number" min="10" max="500"
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-              <p class="text-xs text-gray-600 mt-1">Padding around OSM bbox (10–500)</p>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-300 mb-1.5">Overview Zoom</label>
-              <input id="set-overview-zoom" type="number" min="16" max="21"
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-              <p class="text-xs text-gray-600 mt-1">Zoom for AI validation images (16–21)</p>
             </div>
           </div>
         </div>
@@ -526,6 +525,8 @@ function statusBadge(status, scanId) {
     running_osm: 'bg-yellow-600 text-yellow-100 pulse-badge',
     running_validate: 'bg-yellow-600 text-yellow-100 pulse-badge',
     running_vision: 'bg-yellow-600 text-yellow-100 pulse-badge',
+    running_msft: 'bg-yellow-600 text-yellow-100 pulse-badge',
+    running_overture: 'bg-yellow-600 text-yellow-100 pulse-badge',
     running_tiling: 'bg-yellow-600 text-yellow-100 pulse-badge',
     completed: 'bg-green-700 text-green-100',
     failed: 'bg-red-700 text-red-100',
@@ -658,8 +659,10 @@ function renderTable() {
     html += `<tr class="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer transition" data-id="${scan.id}">
       <td class="px-3 py-2" onclick="event.stopPropagation()"><input type="checkbox" class="row-check rounded bg-gray-800 border-gray-600 cursor-pointer" data-id="${scan.id}" ${checked}></td>
       <td class="px-3 py-2 text-gray-500">${rowNum}</td>
-      <td class="px-3 py-2 font-medium">${esc(scan.facility_name || '-')}</td>
-      <td class="px-3 py-2 text-gray-400 max-w-[14rem] truncate" title="${esc(scan.facility_address || '')}">${esc(scan.facility_address || '-')}</td>
+      <td class="px-3 py-2">
+        <div class="font-medium">${esc(scan.facility_name || '-')}</div>
+        <div class="text-gray-400 truncate max-w-[14rem]" title="${esc(scan.facility_address || '')}">${esc(scan.facility_address || '-')}</div>
+      </td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method, scan.facility_lat, scan.facility_lng)}</td>
@@ -670,7 +673,7 @@ function renderTable() {
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="12" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="11" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }

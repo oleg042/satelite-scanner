@@ -32,6 +32,7 @@ class ScanStatus(str, enum.Enum):
     running_validate = "running_validate"
     running_vision = "running_vision"
     running_msft = "running_msft"
+    running_overture = "running_overture"
     running_tiling = "running_tiling"
     completed = "completed"
     failed = "failed"

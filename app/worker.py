@@ -21,6 +21,8 @@ RUNNING_STATUSES = [
     ScanStatus.running_osm,
     ScanStatus.running_validate,
     ScanStatus.running_vision,
+    ScanStatus.running_msft,
+    ScanStatus.running_overture,
     ScanStatus.running_tiling,
 ]
 

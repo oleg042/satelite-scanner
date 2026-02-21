@@ -134,36 +134,15 @@ _MAX_EDGE_DISTANCE_M = 100
 def find_target_building(
     buildings: list[dict], target_lat: float, target_lng: float
 ) -> dict | None:
-    """Find the building containing the target point, or the nearest one within range."""
-    # Check if target point is inside any building polygon
+    """Find the building containing the target point (pin must be inside polygon)."""
     for b in buildings:
         if point_in_polygon(target_lat, target_lng, b["coords"]):
             area = _building_area(b, target_lat)
             logger.info("Target inside building %d (~%.0f m²)", b["id"], area)
             return b
 
-    # Pick the nearest building by edge distance
-    ranked = []
-    for b in buildings:
-        edge_dist = _building_edge_distance(b, target_lat, target_lng)
-        area = _building_area(b, target_lat)
-        ranked.append((b, edge_dist, area))
-
-    if not ranked:
-        return None
-
-    ranked.sort(key=lambda x: x[1])
-    best, best_dist, best_area = ranked[0]
-
-    if best_dist > _MAX_EDGE_DISTANCE_M:
-        logger.info(
-            "Nearest building %d is %.0fm away (>%dm) — deferring to AI vision",
-            best["id"], best_dist, _MAX_EDGE_DISTANCE_M,
-        )
-        return None
-
-    logger.info("Selected nearest building %d (~%.0f m², %.0fm from pin edge)", best["id"], best_area, best_dist)
-    return best
+    logger.info("Pin not inside any of %d OSM buildings — deferring to fallback", len(buildings))
+    return None
 
 
 def find_target_landuse(

@@ -196,10 +196,11 @@ def find_target_building(
 
     Selection:
     - If pin is inside a building → use it
-    - If not → use the LARGEST building within range (not nearest — the
-      main building is what the user is pointing at)
+    - If nearest edge ≤ 15m → use that building alone (pin basically touching it)
+    - If nearest edge > 15m → combine 2 nearest fragments (pin likely in gap
+      between Overture/MSFT polygon fragments of the same facility)
 
-    Returns the single best-matching building (no merge).
+    Returns a building dict; may contain combined coords from multiple fragments.
     """
     seed = None
 
@@ -211,7 +212,7 @@ def find_target_building(
             seed = b
             break
 
-    # Pin not inside any building — pick the largest within range
+    # Pin not inside any building — select by proximity
     if seed is None:
         candidates = []
         for b in buildings:
@@ -223,9 +224,35 @@ def find_target_building(
         if not candidates:
             return None
 
-        # Sort by area descending — pick the biggest
-        candidates.sort(key=lambda x: x[2], reverse=True)
-        seed, seed_dist, seed_area = candidates[0]
-        logger.info("MSFT: selected largest building %d (~%.0f m², %.0fm from pin)", seed["id"], seed_area, seed_dist)
+        # Sort by distance ascending — nearest first
+        candidates.sort(key=lambda x: x[1])
+        nearest_dist = candidates[0][1]
+
+        if nearest_dist <= 15:
+            # Pin is basically touching this building — use it alone
+            seed = candidates[0][0]
+            logger.info("MSFT: pin ≤15m from building %d (%.0fm), using single", seed["id"], nearest_dist)
+        else:
+            # Pin in gap between fragments — combine 2 nearest
+            selected = candidates[:2]
+            if len(selected) == 1:
+                seed = selected[0][0]
+                logger.info("MSFT: only 1 candidate building %d (%.0fm from pin)", seed["id"], nearest_dist)
+            else:
+                combined_coords = []
+                combined_ids = []
+                for b, dist, area in selected:
+                    combined_coords.extend(b["coords"])
+                    combined_ids.append(b["id"])
+                seed = {
+                    "id": combined_ids[0],
+                    "ids": combined_ids,
+                    "tags": selected[0][0]["tags"],
+                    "coords": combined_coords,
+                }
+                logger.info(
+                    "MSFT: combined %d fragments (ids=%s, %.0fm/%.0fm from pin)",
+                    len(selected), combined_ids, selected[0][1], selected[1][1],
+                )
 
     return seed

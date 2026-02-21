@@ -125,7 +125,7 @@ def _stitch_chunked(
 def capture_area(
     min_lat: float, min_lng: float, max_lat: float, max_lng: float,
     zoom: int, cache: TileCache | None = None, delay: float = 0.05,
-    max_image_mb: int = 512, max_workers: int | None = None,
+    max_image_mb: int | None = None, max_workers: int | None = None,
 ) -> tuple[Image.Image | None, dict | None]:
     """Download and stitch tiles covering a bounding box.
 
@@ -135,6 +135,8 @@ def capture_area(
 
     Returns (image, grid_info) or (None, None) on failure.
     """
+    if max_image_mb is None:
+        max_image_mb = settings.max_image_mb
     if max_workers is None:
         max_workers = settings.tile_concurrency
 

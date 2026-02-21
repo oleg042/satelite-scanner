@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _pw = None          # Playwright instance
 _browser = None     # Chromium browser instance
 _browser_lock = asyncio.Lock()
-_browser_semaphore = asyncio.Semaphore(2)  # max 2 concurrent contexts (~150MB each)
+_browser_semaphore = asyncio.Semaphore(app_settings.browser_concurrency)  # ~150MB each
 
 
 async def _get_browser():
