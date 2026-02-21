@@ -400,6 +400,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                 building = find_target_building(buildings, lat, lng)
                 if building:
                     scan.osm_building_id = building["id"]
+                    msft_buildings = buildings
+                    msft_target_ids = {building["id"]}
                     lats = [c[0] for c in building["coords"]]
                     lngs = [c[1] for c in building["coords"]]
                     raw_bbox = (min(lats), min(lngs), max(lats), max(lngs))

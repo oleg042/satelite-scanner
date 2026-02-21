@@ -18,7 +18,7 @@
   .boundary-overlay{position:absolute;border:2px solid #ef4444;pointer-events:none;z-index:5;border-radius:2px}
   #image-modal .boundary-overlay{border-width:3px}
   .msft-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:4}
-  #image-modal .msft-overlay polygon{stroke-width:3}
+  #image-modal .msft-overlay polygon{stroke-width:2}
   #image-modal{transition:opacity .2s}
   #image-modal.hidden{opacity:0;pointer-events:none}
 </style>
@@ -67,31 +67,31 @@
     <div class="border-b border-gray-800 bg-gray-900/50 px-6 py-4">
       <div class="flex items-start gap-6">
         <!-- New Scan form (inline) -->
-        <form id="scan-form" class="space-y-3 max-w-lg">
-          <div class="flex items-end gap-3">
-            <div class="flex-1">
-              <label class="block text-xs text-gray-500 mb-1">Facility Name</label>
-              <input id="sf-name" type="text" placeholder="Amerequip Corporation" required
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-            </div>
+        <form id="scan-form" class="flex flex-wrap items-end gap-3 flex-1">
+          <div class="w-56">
+            <label class="block text-xs text-gray-500 mb-1">Facility Name</label>
+            <input id="sf-name" type="text" placeholder="Amerequip Corporation" required
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
-          <div class="flex items-end gap-2">
-            <div class="flex-1">
-              <label class="block text-xs text-gray-500 mb-1">Address / Location</label>
-              <input id="sf-location" type="text" placeholder="123 Main St, City, ST  or  Google Maps URL  or  41.05, -80.67" required
-                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-            </div>
-            <button id="sf-resolve" type="button"
-              class="bg-gray-700 hover:bg-gray-600 active:scale-95 text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
-              Resolve
-            </button>
+          <div class="flex-1 min-w-[200px]">
+            <label class="block text-xs text-gray-500 mb-1">Address / Location</label>
+            <input id="sf-location" type="text" placeholder="123 Main St, City, ST  or  Google Maps URL  or  41.05, -80.67" required
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
           </div>
+          <button id="sf-resolve" type="button"
+            class="bg-gray-700 hover:bg-gray-600 active:scale-95 text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
+            Resolve
+          </button>
+          <button id="sf-submit" type="submit" disabled
+            class="bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
+            Submit Scan
+          </button>
           <!-- Resolve result area -->
-          <div id="sf-resolve-result" class="hidden">
+          <div id="sf-resolve-result" class="hidden basis-full">
             <!-- Filled dynamically by JS -->
           </div>
           <!-- Manual override inputs (hidden by default) -->
-          <div id="sf-manual-override" class="hidden flex items-end gap-3">
+          <div id="sf-manual-override" class="hidden basis-full flex items-end gap-3">
             <div>
               <label class="block text-xs text-gray-500 mb-1">Latitude</label>
               <input id="sf-lat" type="number" step="any" placeholder="41.0534"
@@ -105,10 +105,6 @@
             <button type="button" onclick="applyManualCoords()" class="bg-gray-700 hover:bg-gray-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">Apply</button>
             <button type="button" onclick="cancelManualOverride()" class="text-gray-500 hover:text-gray-300 active:scale-95 text-sm transition">Cancel</button>
           </div>
-          <button id="sf-submit" type="submit" disabled
-            class="bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded px-4 py-1.5 text-sm transition whitespace-nowrap">
-            Submit Scan
-          </button>
         </form>
       </div>
     </div>
@@ -130,7 +126,6 @@
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
         <option value="">All Methods</option>
         <option value="osm_building">OSM Building</option>
-        <option value="osm_landuse">OSM Landuse</option>
         <option value="ai_vision">AI Vision</option>
         <option value="msft_buildings">MSFT Buildings</option>
         <option value="skipped">Skipped</option>
@@ -170,10 +165,8 @@
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="method">Method</th>
-              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="ai_facility_type">Type</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Coords</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
-              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Map</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
             </tr>
           </thead>
@@ -472,6 +465,7 @@
           <div class="flex items-center gap-3">
             <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Infrastructure</h3>
             <span class="text-xs bg-amber-600/20 text-amber-400 border border-amber-600/30 rounded px-2 py-0.5 font-medium">Restart Required</span>
+            <button id="restart-btn" onclick="restartService()" class="ml-auto bg-amber-600 hover:bg-amber-500 active:scale-95 text-white font-medium rounded px-3 py-1 text-xs transition">Restart Service</button>
           </div>
           <p class="text-xs text-gray-500 -mt-2">These control worker pools and semaphores created at startup. Changes take effect after restarting the app.</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -576,6 +570,23 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.remove(), type === 'success' ? 4000 : 8000);
 }
 
+// --- Restart service ---
+async function restartService() {
+  const btn = document.getElementById('restart-btn');
+  if (!confirm('Restart the Railway service? The app will be briefly unavailable.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Restarting…';
+  try {
+    await api('POST', '/api/restart');
+    toast('Restart triggered — service will be back in ~30s', 'info');
+  } catch (e) {
+    toast('Restart failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Restart Service';
+  }
+}
+
 // --- Status badge ---
 function statusBadge(status, scanId) {
   const map = {
@@ -632,12 +643,6 @@ function fmtSearchLink(scan) {
   return `<a href="https://www.google.com/maps/search/${q}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300 underline">GMaps</a>`;
 }
 
-function fmtMapLink(scan) {
-  if (scan.bbox_min_lat == null || scan.bbox_max_lat == null) return '-';
-  const lat = ((scan.bbox_min_lat + scan.bbox_max_lat) / 2).toFixed(6);
-  const lng = ((scan.bbox_min_lng + scan.bbox_max_lng) / 2).toFixed(6);
-  return `<a href="https://www.google.com/maps/@${lat},${lng},18z" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300 underline">View</a>`;
-}
 
 function fmtAI(scan) {
   if (scan.ai_validated === true) return '<span class="text-green-400 font-bold">&#10003;</span>';
@@ -657,13 +662,10 @@ function fmtMethod(m, lat, lng) {
 
 function fmtCoords(scan) {
   if (scan.facility_lat == null || scan.facility_lng == null) return '-';
-  return `<div class="leading-tight"><div>${scan.facility_lat.toFixed(6)}</div><div>${scan.facility_lng.toFixed(6)}</div></div>`;
+  const viewLink = `<a href="https://www.google.com/maps/@${scan.facility_lat.toFixed(6)},${scan.facility_lng.toFixed(6)},18z" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300 underline">View</a>`;
+  return `<div class="leading-tight"><div>${scan.facility_lat.toFixed(6)}</div><div>${scan.facility_lng.toFixed(6)}</div><div>${viewLink}</div></div>`;
 }
 
-function fmtType(t) {
-  if (!t) return '-';
-  return esc(t);
-}
 
 // --- Sorting ---
 function getSortValue(scan, field, idx) {
@@ -725,14 +727,12 @@ function renderTable() {
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400">${fmtMethod(scan.method, scan.facility_lat, scan.facility_lng)}</td>
-      <td class="px-3 py-2 text-gray-400 max-w-[10rem] truncate" title="${esc(scan.ai_facility_type || '')}">${fmtType(scan.ai_facility_type)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
-      <td class="px-3 py-2 text-center whitespace-nowrap">${fmtMapLink(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="11" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="9" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
@@ -882,11 +882,11 @@ function drawMsftOverlay(imgEl, polygons, origWidth, origHeight, targetMask) {
     const pg = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     pg.setAttribute('points', points);
     if (isTarget) {
-      pg.setAttribute('fill', 'rgba(0,200,80,0.35)');
+      pg.setAttribute('fill', 'rgba(0,200,80,0.2)');
       pg.setAttribute('stroke', 'rgba(0,200,80,0.9)');
-      pg.setAttribute('stroke-width', '3');
+      pg.setAttribute('stroke-width', '2');
     } else {
-      pg.setAttribute('fill', 'rgba(0,120,255,0.12)');
+      pg.setAttribute('fill', 'rgba(0,120,255,0.2)');
       pg.setAttribute('stroke', 'rgba(0,120,255,0.35)');
       pg.setAttribute('stroke-width', '1');
     }
@@ -902,8 +902,10 @@ function renderDetail(scan) {
   let html = '<div class="space-y-4">';
 
   if (scan.screenshots && scan.screenshots.length > 0) {
+    const ssOrder = { overview: 0, ai_overview: 1, final: 2, msft_overlay: 3 };
+    const sorted = [...scan.screenshots].sort((a, b) => (ssOrder[a.type] ?? 99) - (ssOrder[b.type] ?? 99));
     html += '<div class="flex flex-wrap gap-3">';
-    scan.screenshots.forEach(ss => {
+    sorted.forEach(ss => {
       const sizeParts = [];
       if (ss.width && ss.height) sizeParts.push(`${ss.width}×${ss.height}px`);
       if (ss.file_size_bytes) sizeParts.push(`${(ss.file_size_bytes / 1048576).toFixed(2)} MB`);

@@ -256,6 +256,35 @@ async def cleanup_storage():
     }
 
 
+# --- Railway restart ---
+
+@api_router.post("/restart")
+async def restart_service():
+    """Trigger a redeploy of this Railway service instance."""
+    token = os.environ.get("RAILWAY_API_TOKEN")
+    service_id = os.environ.get("RAILWAY_SERVICE_ID")
+    environment_id = os.environ.get("RAILWAY_ENVIRONMENT_ID")
+    if not all([token, service_id, environment_id]):
+        return JSONResponse({"error": "Railway env vars not configured"}, status_code=500)
+
+    query = """
+    mutation serviceInstanceRedeploy($serviceId: String!, $environmentId: String!) {
+        serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
+    }
+    """
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://backboard.railway.com/graphql/v2",
+            headers={"Project-Access-Token": token, "Content-Type": "application/json"},
+            json={"query": query, "variables": {"serviceId": service_id, "environmentId": environment_id}},
+        )
+    data = resp.json()
+    if "errors" in data:
+        logger.error("Railway redeploy failed: %s", data["errors"])
+        return JSONResponse({"error": data["errors"][0].get("message", "Unknown error")}, status_code=502)
+    return {"ok": True}
+
+
 # --- Geocoder proxies (avoids CORS, sets proper User-Agent) ---
 
 @api_router.get("/geocode/census")
