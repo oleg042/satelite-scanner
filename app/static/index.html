@@ -147,6 +147,10 @@
         class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Scan Selected (<span id="scan-selected-count">0</span>)
       </button>
+      <button id="detect-bins-btn" disabled
+        class="bg-purple-700 hover:bg-purple-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
+        Detect Bins (<span id="detect-bins-count">0</span>)
+      </button>
       <button id="delete-btn" disabled
         class="bg-red-700 hover:bg-red-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Delete Selected (<span id="delete-count">0</span>)
@@ -166,6 +170,9 @@
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="status">Status</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Coords</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
+              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Bins</th>
+              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Qty</th>
+              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Conf</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
             </tr>
           </thead>
@@ -204,9 +211,28 @@
         <button onclick="closeImportModal()" class="text-gray-500 hover:text-gray-300 active:scale-95 text-lg">&times;</button>
       </div>
       <div class="px-5 py-4 space-y-3">
-        <p class="text-sm text-gray-400">Paste tab-separated rows: <code class="text-xs bg-gray-800 px-1 rounded">Company Name&#9;Address</code></p>
-        <textarea id="import-textarea" rows="10" placeholder="Acme Steel Corp&#9;123 Industrial Blvd, Detroit, MI&#10;Metro Fabricators&#9;456 Factory Rd, Cleveland, OH&#10;Precision Metals"
-          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono focus:ring-1 focus:ring-blue-500 outline-none resize-y"></textarea>
+        <!-- Tab switcher -->
+        <div class="flex gap-1 bg-gray-800 rounded-lg p-0.5">
+          <button id="import-tab-paste" onclick="switchImportTab('paste')" class="flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition bg-gray-700 text-white">Paste</button>
+          <button id="import-tab-csv" onclick="switchImportTab('csv')" class="flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition text-gray-400 hover:text-gray-200">CSV</button>
+        </div>
+        <!-- Paste tab -->
+        <div id="import-panel-paste">
+          <p class="text-sm text-gray-400 mb-2">Paste tab-separated rows: <code class="text-xs bg-gray-800 px-1 rounded">Name&#9;Address&#9;Domain</code></p>
+          <textarea id="import-textarea" rows="10" placeholder="Acme Steel Corp&#9;123 Industrial Blvd, Detroit, MI&#9;acmesteel.com&#10;Metro Fabricators&#9;456 Factory Rd, Cleveland, OH&#10;Precision Metals"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm font-mono focus:ring-1 focus:ring-blue-500 outline-none resize-y"></textarea>
+        </div>
+        <!-- CSV tab -->
+        <div id="import-panel-csv" class="hidden">
+          <p class="text-sm text-gray-400 mb-2">Upload a CSV file with columns: <code class="text-xs bg-gray-800 px-1 rounded">Name, Address, Domain</code></p>
+          <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-700 rounded-lg cursor-pointer hover:border-gray-500 transition bg-gray-800/50">
+            <div id="csv-upload-label" class="flex flex-col items-center justify-center py-4">
+              <svg class="w-8 h-8 mb-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+              <p class="text-sm text-gray-400">Click to upload CSV</p>
+            </div>
+            <input id="import-csv-input" type="file" accept=".csv" class="hidden">
+          </label>
+        </div>
         <div class="flex items-center justify-between">
           <span id="import-count" class="text-sm text-gray-500">0 entries</span>
           <div class="flex gap-2">
@@ -459,6 +485,64 @@
           </div>
         </div>
 
+        <!-- Bin Detection -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Bin Detection</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Enable Bin Detection</label>
+              <label class="flex items-center gap-2 cursor-pointer mt-2">
+                <div class="relative">
+                  <input id="set-bin-detection-enabled" type="checkbox" class="sr-only peer">
+                  <div class="w-9 h-5 bg-gray-700 rounded-full peer-checked:bg-purple-600 transition-colors"></div>
+                  <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                </div>
+                <span class="text-sm text-gray-400">Enable</span>
+              </label>
+              <p class="text-xs text-gray-600 mt-1">Auto-detect scrap bins in pipeline</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Bin Detection Model</label>
+              <select id="set-bin-detection-model"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="">Select model...</option>
+                <optgroup label="Flagship">
+                  <option value="gpt-5.2">GPT-5.2 (Latest flagship)</option>
+                  <option value="gpt-5.1">GPT-5.1</option>
+                  <option value="gpt-5">GPT-5</option>
+                  <option value="gpt-4.1">GPT-4.1 (1M context)</option>
+                </optgroup>
+                <optgroup label="Reasoning">
+                  <option value="o3">o3 (Visual reasoning)</option>
+                  <option value="o3-pro">o3 Pro (Most reliable)</option>
+                </optgroup>
+                <optgroup label="Efficient">
+                  <option value="gpt-5-mini">GPT-5 Mini</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 Mini (1M context)</option>
+                  <option value="gpt-4.1-nano">GPT-4.1 Nano (cheapest)</option>
+                </optgroup>
+              </select>
+              <p class="text-xs text-gray-600 mt-1">AI model for bin detection chunks</p>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Max Chunk Size (meters)</label>
+              <input id="set-bin-max-chunk" type="number" min="50" max="200"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Max chunk dimension for AI analysis (50-200)</p>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-sm text-gray-300">Bin Detection Prompt</label>
+              <button type="button" onclick="resetPrompt('bin_detection')"
+                class="text-xs text-gray-500 hover:text-gray-300 active:scale-95 transition">Reset to default</button>
+            </div>
+            <textarea id="set-bin-detection-prompt" rows="10"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
+            <p class="text-xs text-gray-600 mt-1">Sent with each image chunk. Supports {image_width_m}, {image_height_m} placeholders.</p>
+          </div>
+        </div>
+
         <!-- Infrastructure (require restart) -->
         <div class="bg-gray-900 border border-amber-700/50 rounded-lg p-5 space-y-4">
           <div class="flex items-center gap-3">
@@ -635,6 +719,25 @@ function fmtBbox(scan) {
   return `${Math.round(scan.bbox_width_m)}x${Math.round(scan.bbox_height_m)}m`;
 }
 
+function fmtBins(scan) {
+  if (scan.bin_present === true) return '<span class="text-green-400 font-bold">&#10003;</span>';
+  if (scan.bin_present === false) return '<span class="text-gray-500">&#10007;</span>';
+  return '<span class="text-gray-600">-</span>';
+}
+
+function fmtBinQty(scan) {
+  if (scan.bin_count == null) return '-';
+  if (scan.bin_count === 0) return '0';
+  const f = scan.bin_filled_count || 0;
+  const e = scan.bin_empty_count || 0;
+  return `${scan.bin_count} <span class="text-gray-500">(${f}F/${e}E)</span>`;
+}
+
+function fmtBinConf(scan) {
+  if (scan.bin_confidence == null) return '-';
+  return `${scan.bin_confidence}%`;
+}
+
 function fmtSearchLink(scan) {
   const parts = [scan.facility_name, scan.facility_address].filter(Boolean);
   if (parts.length === 0) return '-';
@@ -722,15 +825,19 @@ function renderTable() {
       <td class="px-3 py-2">
         <div class="font-medium">${esc(scan.facility_name || '-')}</div>
         <div class="text-gray-400 truncate max-w-[14rem]" title="${esc(scan.facility_address || '')}">${esc(scan.facility_address || '-')}</div>
+        ${scan.domain ? `<div class="text-gray-400 truncate max-w-[14rem]"><a href="${escAttr(scan.domain.match(/^https?:\/\//) ? scan.domain : 'https://' + scan.domain)}" target="_blank" rel="noopener" class="text-gray-400 hover:text-gray-300 no-underline" onclick="event.stopPropagation()">${esc(scan.domain)}</a></div>` : ''}
       </td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
       <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
+      <td class="px-3 py-2 text-center whitespace-nowrap">${fmtBins(scan)}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap text-center">${fmtBinQty(scan)}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap text-center">${fmtBinConf(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {
-      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="8" class="px-4 py-3">`;
+      html += `<tr class="border-b border-gray-800 bg-gray-800/30"><td colspan="11" class="px-4 py-3">`;
       html += renderDetail(scan);
       html += `</td></tr>`;
     }
@@ -786,6 +893,9 @@ function esc(str) {
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+function escAttr(str) {
+  return str.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // --- Image modal ---
@@ -900,7 +1010,7 @@ function renderDetail(scan) {
   let html = '<div class="space-y-4">';
 
   if (scan.screenshots && scan.screenshots.length > 0) {
-    const ssOrder = { overview: 0, ai_overview: 1, final: 2, msft_overlay: 3 };
+    const ssOrder = { overview: 0, ai_overview: 1, final: 2, bin_chunk: 3, msft_overlay: 4 };
     const sorted = [...scan.screenshots].sort((a, b) => (ssOrder[a.type] ?? 99) - (ssOrder[b.type] ?? 99));
     html += '<div class="flex flex-wrap gap-3">';
     sorted.forEach(ss => {
@@ -974,6 +1084,25 @@ function renderDetail(scan) {
         </div>`;
       }
     });
+    html += '</div>';
+  }
+
+  // Bin detection summary
+  if (scan.bin_detection_status) {
+    html += '<div class="bg-gray-900 rounded-lg px-4 py-3 text-sm">';
+    html += '<div class="flex items-center gap-3">';
+    html += '<span class="text-xs font-semibold uppercase tracking-wide text-gray-400">Bin Detection</span>';
+    const bds = scan.bin_detection_status;
+    const bdsColor = bds === 'completed' ? 'text-green-400' : bds === 'partial' ? 'text-yellow-400' : 'text-red-400';
+    html += `<span class="text-xs ${bdsColor}">${bds}</span>`;
+    html += '</div>';
+    if (scan.bin_present) {
+      html += `<div class="mt-1 text-gray-300">${scan.bin_count} bin${scan.bin_count !== 1 ? 's' : ''} detected`;
+      html += ` (${scan.bin_filled_count || 0} filled, ${scan.bin_empty_count || 0} empty)`;
+      html += ` — confidence: ${scan.bin_confidence}%</div>`;
+    } else {
+      html += '<div class="mt-1 text-gray-500">No bins detected</div>';
+    }
     html += '</div>';
   }
 
@@ -1152,6 +1281,14 @@ function updateSelectionBtns() {
   document.getElementById('scan-selected-count').textContent = count;
   scanBtn.disabled = count === 0;
   scanBtn.classList.toggle('hidden', count === 0);
+
+  const binBtn = document.getElementById('detect-bins-btn');
+  if (!document.getElementById('detect-bins-count')) {
+    binBtn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
+  }
+  document.getElementById('detect-bins-count').textContent = count;
+  binBtn.disabled = count === 0;
+  binBtn.classList.toggle('hidden', count === 0);
 }
 
 async function deleteSelected() {
@@ -1206,6 +1343,33 @@ async function scanSelected() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = 'Scan Selected (<span id="scan-selected-count">0</span>)';
+    updateSelectionBtns();
+  }
+}
+
+async function detectBinsSelected() {
+  const ids = [...S.selected];
+  if (ids.length === 0) return;
+
+  const btn = document.getElementById('detect-bins-btn');
+  btn.disabled = true;
+  btn.textContent = 'Detecting...';
+
+  try {
+    const res = await api('POST', '/api/scans/detect-bins', { scan_ids: ids });
+    let msg = `Bin detection: ${res.processed} processed`;
+    if (res.skipped > 0) msg += `, ${res.skipped} skipped`;
+    toast(msg);
+    // Invalidate trace cache for processed scans
+    ids.forEach(id => { delete S.expanded[id]; });
+    S.selected.clear();
+    updateSelectionBtns();
+    fetchScans();
+  } catch (e) {
+    toast('Bin detection failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
     updateSelectionBtns();
   }
 }
@@ -1311,6 +1475,11 @@ async function loadSettings() {
     document.getElementById('set-correction-mode').value = s.correction_mode || 'v1';
     document.getElementById('set-verification-correction-prompt').value = s.verification_correction_prompt || '';
     document.getElementById('set-bbox-validation').checked = (s.bbox_validation_enabled || 'true') === 'true';
+    // Bin detection
+    document.getElementById('set-bin-detection-enabled').checked = (s.bin_detection_enabled || 'false') === 'true';
+    document.getElementById('set-bin-detection-model').value = s.bin_detection_model || '';
+    document.getElementById('set-bin-max-chunk').value = s.bin_detection_max_chunk_m || '';
+    document.getElementById('set-bin-detection-prompt').value = s.bin_detection_prompt || '';
     // Performance
     document.getElementById('set-tile-delay').value = s.tile_delay_s || '';
     document.getElementById('set-tile-concurrency').value = s.tile_concurrency || '';
@@ -1366,6 +1535,14 @@ async function saveSettings(e) {
   const vcp = document.getElementById('set-verification-correction-prompt').value.trim();
   if (vcp) body.verification_correction_prompt = vcp;
   body.bbox_validation_enabled = document.getElementById('set-bbox-validation').checked ? 'true' : 'false';
+  // Bin detection
+  body.bin_detection_enabled = document.getElementById('set-bin-detection-enabled').checked ? 'true' : 'false';
+  const bdm = document.getElementById('set-bin-detection-model').value.trim();
+  if (bdm) body.bin_detection_model = bdm;
+  const bmc = document.getElementById('set-bin-max-chunk').value.trim();
+  if (bmc) body.bin_detection_max_chunk_m = bmc;
+  const bdp = document.getElementById('set-bin-detection-prompt').value.trim();
+  if (bdp) body.bin_detection_prompt = bdp;
   // Performance
   const td = document.getElementById('set-tile-delay').value.trim();
   if (td) body.tile_delay_s = td;
@@ -1674,15 +1851,45 @@ async function submitScan(e) {
 }
 
 // --- Import modal ---
+let importItems = [];  // shared items array for both paste & CSV
+
 function openImportModal() {
   document.getElementById('import-modal').classList.remove('hidden');
   document.getElementById('import-textarea').value = '';
+  document.getElementById('import-csv-input').value = '';
+  document.getElementById('csv-upload-label').innerHTML = `
+    <svg class="w-8 h-8 mb-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+    <p class="text-sm text-gray-400">Click to upload CSV</p>`;
+  importItems = [];
+  switchImportTab('paste');
   updateImportCount();
   document.getElementById('import-textarea').focus();
 }
 
 function closeImportModal() {
   document.getElementById('import-modal').classList.add('hidden');
+  importItems = [];
+}
+
+function switchImportTab(tab) {
+  const pasteBtn = document.getElementById('import-tab-paste');
+  const csvBtn = document.getElementById('import-tab-csv');
+  const pastePanel = document.getElementById('import-panel-paste');
+  const csvPanel = document.getElementById('import-panel-csv');
+
+  if (tab === 'paste') {
+    pasteBtn.className = 'flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition bg-gray-700 text-white';
+    csvBtn.className = 'flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition text-gray-400 hover:text-gray-200';
+    pastePanel.classList.remove('hidden');
+    csvPanel.classList.add('hidden');
+  } else {
+    csvBtn.className = 'flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition bg-gray-700 text-white';
+    pasteBtn.className = 'flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition text-gray-400 hover:text-gray-200';
+    csvPanel.classList.remove('hidden');
+    pastePanel.classList.add('hidden');
+  }
+  S._importTab = tab;
+  updateImportCount();
 }
 
 function parseImportLines(text) {
@@ -1690,27 +1897,119 @@ function parseImportLines(text) {
     .map(line => line.trim())
     .filter(line => line.length > 0)
     .map(line => {
-      const tabIdx = line.indexOf('\t');
-      if (tabIdx === -1) return { name: line, address: null };
-      return { name: line.slice(0, tabIdx).trim(), address: line.slice(tabIdx + 1).trim() || null };
+      const parts = line.split('\t');
+      const name = (parts[0] || '').trim();
+      const address = (parts[1] || '').trim() || null;
+      const domain = (parts[2] || '').trim() || null;
+      return { name, address, domain };
     })
     .filter(item => item.name.length > 0);
 }
 
+function parseCsvText(text) {
+  // Parse CSV with support for quoted fields
+  const lines = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { current += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+    } else if (ch === '\n' && !inQuotes) {
+      lines.push(current); current = '';
+    } else if (ch === '\r' && !inQuotes) {
+      // skip \r
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) lines.push(current);
+
+  if (lines.length === 0) return [];
+
+  // Split each line into fields
+  function splitCsvLine(line) {
+    const fields = [];
+    let field = '';
+    let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (q && line[i + 1] === '"') { field += '"'; i++; }
+        else { q = !q; }
+      } else if (ch === ',' && !q) {
+        fields.push(field); field = '';
+      } else {
+        field += ch;
+      }
+    }
+    fields.push(field);
+    return fields.map(f => f.trim());
+  }
+
+  // Map headers case-insensitively
+  const headerFields = splitCsvLine(lines[0]);
+  const headerMap = {};
+  headerFields.forEach((h, i) => { headerMap[h.toLowerCase().replace(/[^a-z]/g, '')] = i; });
+
+  const nameIdx = headerMap['name'] ?? headerMap['companyname'] ?? headerMap['facilityname'] ?? 0;
+  const addrIdx = headerMap['address'] ?? headerMap['addr'] ?? headerMap['facilityaddress'] ?? 1;
+  const domainIdx = headerMap['domain'] ?? headerMap['website'] ?? headerMap['url'] ?? 2;
+
+  // Check if first row looks like a header
+  const firstVal = headerFields[nameIdx] || '';
+  const isHeader = /^(name|company|facility)/i.test(firstVal);
+  const startIdx = isHeader ? 1 : 0;
+
+  const items = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    const fields = splitCsvLine(lines[i]);
+    const name = (fields[nameIdx] || '').trim();
+    if (!name) continue;
+    items.push({
+      name,
+      address: (fields[addrIdx] || '').trim() || null,
+      domain: (fields[domainIdx] || '').trim() || null,
+    });
+  }
+  return items;
+}
+
+function handleCsvFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    importItems = parseCsvText(ev.target.result);
+    document.getElementById('csv-upload-label').innerHTML = `
+      <svg class="w-6 h-6 mb-1 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      <p class="text-sm text-gray-300">${esc(file.name)}</p>
+      <p class="text-xs text-gray-500">${importItems.length} entries parsed</p>`;
+    updateImportCount();
+  };
+  reader.readAsText(file);
+}
+
 function updateImportCount() {
-  const items = parseImportLines(document.getElementById('import-textarea').value);
-  const count = items.length;
+  let count;
+  if (S._importTab === 'csv') {
+    count = importItems.length;
+  } else {
+    count = parseImportLines(document.getElementById('import-textarea').value).length;
+  }
   document.getElementById('import-count').textContent = `${count} entr${count === 1 ? 'y' : 'ies'}`;
   document.getElementById('import-submit-btn').disabled = count === 0;
 }
 
 async function submitImport() {
-  const items = parseImportLines(document.getElementById('import-textarea').value);
-  if (items.length === 0) return;
-  if (items.length > 200) {
-    toast('Max 200 entries per import', 'error');
-    return;
+  let items;
+  if (S._importTab === 'csv') {
+    items = importItems;
+  } else {
+    items = parseImportLines(document.getElementById('import-textarea').value);
   }
+  if (items.length === 0) return;
 
   const btn = document.getElementById('import-submit-btn');
   btn.disabled = true;
@@ -1758,6 +2057,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Import modal
   document.getElementById('import-btn').addEventListener('click', openImportModal);
   document.getElementById('import-textarea').addEventListener('input', updateImportCount);
+  document.getElementById('import-csv-input').addEventListener('change', handleCsvFile);
 
   // Select all checkbox
   document.getElementById('select-all').addEventListener('change', (e) => {
@@ -1773,6 +2073,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Delete button
   document.getElementById('delete-btn').addEventListener('click', deleteSelected);
   document.getElementById('scan-selected-btn').addEventListener('click', scanSelected);
+  document.getElementById('detect-bins-btn').addEventListener('click', detectBinsSelected);
   document.getElementById('scan-pending-btn').addEventListener('click', scanAllPending);
 
   // Refresh

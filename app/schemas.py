@@ -24,10 +24,11 @@ class ScanRequest(BaseModel):
 class BulkImportItem(BaseModel):
     name: str
     address: Optional[str] = None
+    domain: Optional[str] = None
 
 
 class BulkImportRequest(BaseModel):
-    facilities: list[BulkImportItem] = Field(..., min_length=1, max_length=200)
+    facilities: list[BulkImportItem] = Field(..., min_length=1)
 
 
 class BatchScanRequest(BaseModel):
@@ -49,6 +50,11 @@ class SettingsUpdate(BaseModel):
     correction_mode: Optional[str] = None
     verification_correction_prompt: Optional[str] = None
     bbox_validation_enabled: Optional[str] = None
+    # Bin detection
+    bin_detection_enabled: Optional[str] = None
+    bin_detection_prompt: Optional[str] = None
+    bin_detection_model: Optional[str] = None
+    bin_detection_max_chunk_m: Optional[str] = None
     # Performance (per-scan, dynamic)
     tile_concurrency: Optional[str] = None
     tile_delay_s: Optional[str] = None
@@ -82,6 +88,7 @@ class ScanResponse(BaseModel):
     id: UUID
     facility_name: str = ""
     facility_address: Optional[str] = None
+    domain: Optional[str] = None
     facility_lat: Optional[float] = None
     facility_lng: Optional[float] = None
     status: str
@@ -104,6 +111,12 @@ class ScanResponse(BaseModel):
     tiles_downloaded: Optional[int] = None
     image_width: Optional[int] = None
     image_height: Optional[int] = None
+    bin_present: Optional[bool] = None
+    bin_count: Optional[int] = None
+    bin_filled_count: Optional[int] = None
+    bin_empty_count: Optional[int] = None
+    bin_confidence: Optional[int] = None
+    bin_detection_status: Optional[str] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
     started_at: Optional[datetime] = None
@@ -136,6 +149,11 @@ class SettingsResponse(BaseModel):
     correction_mode: str = ""
     verification_correction_prompt: str = ""
     bbox_validation_enabled: str = ""
+    # Bin detection
+    bin_detection_enabled: str = ""
+    bin_detection_prompt: str = ""
+    bin_detection_model: str = ""
+    bin_detection_max_chunk_m: str = ""
     # Performance (per-scan, dynamic)
     tile_concurrency: str = ""
     tile_delay_s: str = ""

@@ -43,6 +43,10 @@ DEFAULT_SETTINGS = {
     "max_image_mb": str(settings.max_image_mb),
     "duckdb_memory_limit": "128MB",
     "duckdb_threads": "2",
+    # Bin detection
+    "bin_detection_enabled": "false",
+    "bin_detection_model": "gpt-5.2",
+    "bin_detection_max_chunk_m": "100",
     # Infrastructure (require restart)
     "worker_concurrency": str(settings.worker_concurrency),
     "heavy_phase_concurrency": str(settings.heavy_phase_concurrency),
@@ -74,6 +78,9 @@ async def _init_db():
         ))
         await conn.execute(text(
             "ALTER TYPE screenshot_type ADD VALUE IF NOT EXISTS 'msft_overlay'"
+        ))
+        await conn.execute(text(
+            "ALTER TYPE screenshot_type ADD VALUE IF NOT EXISTS 'bin_chunk'"
         ))
         await conn.close()
     except Exception as e:
@@ -124,6 +131,15 @@ async def _init_db():
         """))
 
         await conn.run_sync(Base.metadata.create_all)
+
+        # Bin detection column migration (idempotent)
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_present BOOLEAN"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_count INTEGER"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_filled_count INTEGER"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_empty_count INTEGER"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_confidence INTEGER"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_detection_status TEXT"))
+
     logger.info("Database tables ready")
 
     # Seed default settings (don't overwrite existing)

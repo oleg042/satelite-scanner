@@ -53,6 +53,7 @@ class ScreenshotType(str, enum.Enum):
     ai_overview = "ai_overview"
     final = "final"
     msft_overlay = "msft_overlay"
+    bin_chunk = "bin_chunk"
 
 
 # --- Models ---
@@ -63,6 +64,7 @@ class Scan(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     facility_name = Column(Text, nullable=False, default="Unknown")
     facility_address = Column(Text, nullable=True)
+    domain = Column(Text, nullable=True)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
     status = Column(Enum(ScanStatus, name="scan_status"), default=ScanStatus.queued)
@@ -96,6 +98,14 @@ class Scan(Base):
     tiles_downloaded = Column(Integer, nullable=True)
     image_width = Column(Integer, nullable=True)
     image_height = Column(Integer, nullable=True)
+
+    # Bin detection
+    bin_present = Column(Boolean, nullable=True)
+    bin_count = Column(Integer, nullable=True)
+    bin_filled_count = Column(Integer, nullable=True)
+    bin_empty_count = Column(Integer, nullable=True)
+    bin_confidence = Column(Integer, nullable=True)
+    bin_detection_status = Column(Text, nullable=True)
 
     # Error / skip
     error_message = Column(Text, nullable=True)
