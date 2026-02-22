@@ -122,6 +122,7 @@ async def detect_bins_in_chunk(
     model: str,
     prompt_template: str,
     chunk_label: str = "",
+    include_reasoning: bool = True,
 ) -> dict:
     """Run AI bin detection on a single image chunk.
 
@@ -132,6 +133,10 @@ async def detect_bins_in_chunk(
     prompt = prompt.replace("{image_width_px}", str(width_px))
     prompt = prompt.replace("{image_height_px}", str(height_px))
 
+    if not include_reasoning:
+        import re as _re
+        prompt = _re.sub(r',?\s*"reasoning"\s*:\s*"[^"]*"', '', prompt)
+
     max_retries = 3
     last_error = None
 
@@ -141,6 +146,8 @@ async def detect_bins_in_chunk(
                 _call_openai_vision,
                 chunk_image_b64, prompt, api_key, model,
             )
+            if not include_reasoning:
+                result["parsed"].pop("reasoning", None)
             logger.info("Chunk %s: bin_present=%s, bins=%d",
                         chunk_label, result["parsed"].get("bin_present"),
                         result["parsed"].get("total_bins", 0))
@@ -250,6 +257,7 @@ async def run_bin_detection(
     prompt_template: str,
     max_chunk_m: float = 100.0,
     min_confidence: int = 50,
+    include_reasoning: bool = True,
 ) -> BinDetectionResult:
     """Run bin detection on a final satellite image.
 
@@ -290,6 +298,7 @@ async def run_bin_detection(
             b64, chunk["width_m"], chunk["height_m"],
             chunk["px_w"], chunk["px_h"],
             api_key, model, prompt_template, label,
+            include_reasoning=include_reasoning,
         ))
 
     results = await asyncio.gather(*tasks)
@@ -389,7 +398,7 @@ async def run_bin_detection(
                 total_bins += 1
 
         # Collect reasoning
-        reasoning = parsed.get("reasoning", "")
+        reasoning = parsed.get("reasoning", "") if include_reasoning else ""
         if isinstance(reasoning, list):
             reasoning = " ".join(r for r in reasoning if r and r.strip())
         if isinstance(reasoning, str) and reasoning.strip():
@@ -438,6 +447,7 @@ async def execute_bin_detection(
     clean_old: bool = True,
     delete_final_image: bool = False,
     resize_final_image: bool = False,
+    include_reasoning: bool = True,
 ) -> dict:
     """Full bin detection workflow: chunk, detect, save screenshots, record steps.
 
@@ -515,6 +525,7 @@ async def execute_bin_detection(
         scan.bbox_width_m, scan.bbox_height_m,
         api_key, model, prompt, max_chunk_m,
         min_confidence=min_confidence,
+        include_reasoning=include_reasoning,
     )
 
     # Update scan fields
@@ -585,6 +596,7 @@ async def execute_bin_detection(
             "chunk_count": bin_result.chunks_total,
             "model": model,
             "min_confidence": min_confidence,
+            "include_reasoning": include_reasoning,
         }),
         output_summary=json.dumps({
             "bin_present": bin_result.bin_present,

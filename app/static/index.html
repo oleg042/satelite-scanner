@@ -122,13 +122,11 @@
         <option value="skipped">Skipped</option>
         <option value="completed">Completed</option>
       </select>
-      <select id="filter-method"
+      <select id="filter-bins"
         class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-        <option value="">All Methods</option>
-        <option value="osm_building">OSM Building</option>
-        <option value="ai_vision">AI Vision</option>
-        <option value="msft_buildings">MSFT Buildings</option>
-        <option value="skipped">Skipped</option>
+        <option value="">All Bins</option>
+        <option value="true">Bins Found</option>
+        <option value="false">No Bins</option>
       </select>
       <button id="import-btn" title="Bulk import facilities"
         class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
@@ -553,6 +551,14 @@
                 <span class="text-sm text-gray-300">Resize Final Image After Detection (50%)</span>
               </label>
               <p class="text-xs text-gray-600 mt-1">Shrink the final image to half its dimensions after bin detection. Keeps the image but cuts file size ~75%.</p>
+            </div>
+            <div>
+              <label class="flex items-center gap-2 cursor-pointer mt-2">
+                <input id="set-bin-reasoning" type="checkbox"
+                  class="rounded bg-gray-800 border-gray-600 cursor-pointer" checked>
+                <span class="text-sm text-gray-300">Include Per-Bin Reasoning in Prompt</span>
+              </label>
+              <p class="text-xs text-gray-600 mt-1">When disabled, the "reasoning" field is stripped from the prompt to save tokens and reduce hallucination.</p>
             </div>
           </div>
           <div>
@@ -1614,12 +1620,12 @@ async function scanAllPending() {
 // --- Fetch scans ---
 async function fetchScans() {
   const params = new URLSearchParams();
-  const method = document.getElementById('filter-method').value;
+  const bins = document.getElementById('filter-bins').value;
   const search = document.getElementById('search-input').value.trim();
 
   const status = document.getElementById('filter-status').value;
   if (status) params.set('status', status);
-  if (method) params.set('method', method);
+  if (bins) params.set('bins', bins);
   if (search) params.set('search', search);
   params.set('limit', S.limit);
   params.set('offset', S.offset);
@@ -1699,6 +1705,7 @@ async function loadSettings() {
     document.getElementById('set-bin-min-confidence').value = s.bin_detection_min_confidence || '50';
     document.getElementById('set-bin-delete-final').checked = (s.bin_delete_final_image || 'false') === 'true';
     document.getElementById('set-bin-resize-final').checked = (s.bin_resize_final_image || 'false') === 'true';
+    document.getElementById('set-bin-reasoning').checked = (s.bin_detection_reasoning || 'true') === 'true';
     document.getElementById('set-bin-detection-prompt').value = s.bin_detection_prompt || '';
     // Performance
     document.getElementById('set-tile-delay').value = s.tile_delay_s || '';
@@ -1765,6 +1772,7 @@ async function saveSettings(e) {
   if (bmnc) body.bin_detection_min_confidence = bmnc;
   body.bin_delete_final_image = document.getElementById('set-bin-delete-final').checked ? 'true' : 'false';
   body.bin_resize_final_image = document.getElementById('set-bin-resize-final').checked ? 'true' : 'false';
+  body.bin_detection_reasoning = document.getElementById('set-bin-reasoning').checked ? 'true' : 'false';
   const bdp = document.getElementById('set-bin-detection-prompt').value.trim();
   if (bdp) body.bin_detection_prompt = bdp;
   // Performance
@@ -2276,7 +2284,7 @@ document.addEventListener('DOMContentLoaded', () => {
     searchTimer = setTimeout(() => { S.offset = 0; fetchScans(); }, 300);
   });
   document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
-  document.getElementById('filter-method').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+  document.getElementById('filter-bins').addEventListener('change', () => { S.offset = 0; fetchScans(); });
 
   // Import modal
   document.getElementById('import-btn').addEventListener('click', openImportModal);

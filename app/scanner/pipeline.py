@@ -139,6 +139,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         bin_detection_min_confidence = 50
     bin_delete_final_image = (await _get_setting(db, "bin_delete_final_image", "false")).lower() == "true"
     bin_resize_final_image = (await _get_setting(db, "bin_resize_final_image", "false")).lower() == "true"
+    bin_detection_reasoning = (await _get_setting(db, "bin_detection_reasoning", "true")).lower() == "true"
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -166,6 +167,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "bin_detection_min_confidence": bin_detection_min_confidence,
         "bin_delete_final_image": bin_delete_final_image,
         "bin_resize_final_image": bin_resize_final_image,
+        "bin_detection_reasoning": bin_detection_reasoning,
     }
 
 
@@ -1158,6 +1160,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     clean_old=False,
                     delete_final_image=config["bin_delete_final_image"],
                     resize_final_image=config["bin_resize_final_image"],
+                    include_reasoning=config["bin_detection_reasoning"],
                 )
                 step_num += 1  # execute_bin_detection records 2 steps (chunking + detection)
             except Exception as e:

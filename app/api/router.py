@@ -129,6 +129,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         bin_detection_min_confidence=settings_dict.get("bin_detection_min_confidence", ""),
         bin_delete_final_image=settings_dict.get("bin_delete_final_image", "false"),
         bin_resize_final_image=settings_dict.get("bin_resize_final_image", "false"),
+        bin_detection_reasoning=settings_dict.get("bin_detection_reasoning", "true"),
         # Performance (per-scan, dynamic)
         tile_concurrency=settings_dict.get("tile_concurrency", ""),
         tile_delay_s=settings_dict.get("tile_delay_s", ""),

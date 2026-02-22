@@ -167,6 +167,7 @@ async def list_scans(
     status: str | None = Query(None),
     exclude_status: str | None = Query(None),
     method: str | None = Query(None),
+    bins: str | None = Query(None),
     search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -181,6 +182,10 @@ async def list_scans(
         q = q.where(Scan.status != exclude_status)
     if method:
         q = q.where(Scan.method == method)
+    if bins == "true":
+        q = q.where(Scan.bin_present == True)
+    elif bins == "false":
+        q = q.where(Scan.bin_present == False)
     if search:
         q = q.where(Scan.facility_name.ilike(f"%{search}%") | Scan.facility_address.ilike(f"%{search}%"))
 
@@ -311,6 +316,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         min_confidence = 50
     delete_final = (await _get_setting(db, "bin_delete_final_image", "false")).lower() == "true"
     resize_final = (await _get_setting(db, "bin_resize_final_image", "false")).lower() == "true"
+    include_reasoning = (await _get_setting(db, "bin_detection_reasoning", "true")).lower() == "true"
 
     # Determine step number (after existing steps)
     max_step_result = await db.execute(
@@ -330,6 +336,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         clean_old=True,
         delete_final_image=delete_final,
         resize_final_image=resize_final,
+        include_reasoning=include_reasoning,
     )
 
 
