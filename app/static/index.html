@@ -2281,6 +2281,7 @@ function parseCsvText(text) {
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === '"') {
+      current += '"';
       if (inQuotes && text[i + 1] === '"') { current += '"'; i++; }
       else { inQuotes = !inQuotes; }
     } else if (ch === '\n' && !inQuotes) {
