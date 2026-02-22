@@ -133,21 +133,39 @@ async def submit_batch(req: BatchScanRequest, db: AsyncSession = Depends(get_db)
 
 @router.post("/scan/import", response_model=list[ScanSubmitted], status_code=202)
 async def import_facilities(req: BulkImportRequest, db: AsyncSession = Depends(get_db)):
-    """Import facilities by name/address — no coordinates, no worker queue."""
+    """Import facilities by name/address — no coordinates, no worker queue.
+
+    Duplicates are detected by facility_name + facility_address (case-insensitive).
+    Existing rows are left untouched except domain is backfilled if missing.
+    """
     results = []
     for item in req.facilities:
-        scan = Scan(
-            facility_name=item.name,
-            facility_address=item.address,
-            domain=item.domain,
-            lat=None,
-            lng=None,
-            status=ScanStatus.pending,
+        # Check for existing facility by name + address (case-insensitive)
+        q = select(Scan).where(
+            func.lower(Scan.facility_name) == (item.name or "").strip().lower(),
+            func.lower(func.coalesce(Scan.facility_address, ""))
+            == (item.address or "").strip().lower(),
         )
-        db.add(scan)
-        await db.flush()
+        existing = (await db.execute(q)).scalar_one_or_none()
 
-        results.append(ScanSubmitted(scan_id=scan.id, status="pending"))
+        if existing:
+            # Backfill domain only if the existing row has none
+            if not existing.domain and item.domain:
+                existing.domain = item.domain
+            await db.flush()
+            results.append(ScanSubmitted(scan_id=existing.id, status=existing.status))
+        else:
+            scan = Scan(
+                facility_name=item.name,
+                facility_address=item.address,
+                domain=item.domain,
+                lat=None,
+                lng=None,
+                status=ScanStatus.pending,
+            )
+            db.add(scan)
+            await db.flush()
+            results.append(ScanSubmitted(scan_id=scan.id, status="pending"))
 
     await db.commit()
     return results
