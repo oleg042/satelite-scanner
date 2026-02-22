@@ -1279,9 +1279,11 @@ function renderDetail(scan) {
 
       // Extract bin detection info
       const binOut = binStep && binStep.output_summary ? binStep.output_summary : {};
+      const binIn = binStep && binStep.input_summary ? binStep.input_summary : {};
       const chunkResults = binOut.chunk_results || [];
       const totalBins = binOut.total_bins || 0;
       const binTokensTotal = binStep ? (binStep.ai_tokens_total || 0) : 0;
+      const minConfidence = binIn.min_confidence || 50;
       const binDur = binStep && binStep.duration_ms != null ? (binStep.duration_ms / 1000).toFixed(1) : '?';
       const binModel = binStep ? (binStep.ai_model || '?') : '?';
       const bds = scan.bin_detection_status;
@@ -1345,15 +1347,17 @@ function renderDetail(scan) {
         const crFilled = cr.filled_or_partial_count || 0;
         const crEmpty = cr.empty_or_unclear_count || 0;
         const hasBins = binCountStr > 0;
+        const passesGate = hasBins && crAvgConf >= minConfidence;
 
         html += `<details class="text-xs">`;
         html += `<summary class="cursor-pointer hover:text-gray-300 text-gray-400 bg-gray-900 rounded px-3 py-1">`;
-        html += `<span class="font-medium ${hasBins ? 'text-green-400' : 'text-gray-300'}">${esc(label)}</span>: `;
+        html += `<span class="font-medium ${passesGate ? 'text-green-400' : hasBins ? 'text-yellow-600' : 'text-gray-300'}">${esc(label)}</span>: `;
         if (hasBins) {
           html += `<span class="text-gray-300">${binCountStr} bin${binCountStr !== 1 ? 's' : ''}</span>`;
           html += ` <span class="text-yellow-400">${crFilled}F</span>`;
           html += ` <span class="text-gray-500">${crEmpty}E</span>`;
-          html += ` <span class="text-gray-300">conf ${crAvgConf}%</span>`;
+          html += ` <span class="${passesGate ? 'text-gray-300' : 'text-yellow-600'}">conf ${crAvgConf}%</span>`;
+          if (!passesGate) html += ` <span class="text-yellow-700">(below ${minConfidence}%)</span>`;
         } else {
           html += `<span class="text-gray-500">0 bins</span>`;
         }

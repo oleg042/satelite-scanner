@@ -583,6 +583,7 @@ async def execute_bin_detection(
         input_summary=json.dumps({
             "chunk_count": bin_result.chunks_total,
             "model": model,
+            "min_confidence": min_confidence,
         }),
         output_summary=json.dumps({
             "bin_present": bin_result.bin_present,
