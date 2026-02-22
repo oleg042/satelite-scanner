@@ -34,11 +34,11 @@ async def enqueue_scan(scan_id: UUID):
 
 
 async def recover_stuck_scans():
-    """On startup, re-queue scans stuck in running_* or queued states.
+    """On startup, mark scans stuck in running_* or queued states as failed.
 
-    These were interrupted by a crash/restart. The in-memory queue is gone,
-    so they need to be re-enqueued. The pipeline handles re-runs cleanly
-    (clears old steps/screenshots).
+    These were interrupted by a crash/restart. Instead of re-queuing them
+    (which can cause OOM crash loops), mark them failed so the user can
+    manually retry from the UI when ready.
     """
     async with async_session() as db:
         result = await db.execute(
@@ -54,19 +54,16 @@ async def recover_stuck_scans():
 
         for scan in stuck_scans:
             old_status = scan.status
-            scan.status = ScanStatus.queued
-            scan.error_message = None
+            scan.status = ScanStatus.failed
+            scan.error_message = f"Interrupted by server restart (was {old_status.value})"
             logger.info(
-                "Recovering stuck scan %s (was %s) → queued",
+                "Marking stuck scan %s as failed (was %s)",
                 scan.id, old_status.value,
             )
 
         await db.commit()
 
-        for scan in stuck_scans:
-            await enqueue_scan(scan.id)
-
-        logger.info("Recovered %d stuck scans on startup", len(stuck_scans))
+        logger.info("Marked %d stuck scans as failed on startup", len(stuck_scans))
         return len(stuck_scans)
 
 
