@@ -34,6 +34,7 @@ class ScanStatus(str, enum.Enum):
     running_msft = "running_msft"
     running_overture = "running_overture"
     running_tiling = "running_tiling"
+    running_bin_detection = "running_bin_detection"
     completed = "completed"
     failed = "failed"
     skipped = "skipped"

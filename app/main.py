@@ -82,6 +82,9 @@ async def _init_db():
         await conn.execute(text(
             "ALTER TYPE screenshot_type ADD VALUE IF NOT EXISTS 'bin_chunk'"
         ))
+        await conn.execute(text(
+            "ALTER TYPE scan_status ADD VALUE IF NOT EXISTS 'running_bin_detection'"
+        ))
         await conn.close()
     except Exception as e:
         logger.info("Enum migration skipped (fresh DB or already done): %s", e)

@@ -24,6 +24,7 @@ RUNNING_STATUSES = [
     ScanStatus.running_msft,
     ScanStatus.running_overture,
     ScanStatus.running_tiling,
+    ScanStatus.running_bin_detection,
 ]
 
 

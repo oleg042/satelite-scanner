@@ -1147,6 +1147,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
         if config["bin_detection_enabled"] and config["api_key"] and config["bin_detection_prompt"] and final_image_abs:
             step_num += 1
+            scan.status = ScanStatus.running_bin_detection
+            await db.commit()
             try:
                 await execute_bin_detection(
                     scan, db, final_image_abs,
