@@ -138,21 +138,27 @@ async def import_facilities(req: BulkImportRequest, db: AsyncSession = Depends(g
     Duplicates are detected by facility_name + facility_address (case-insensitive).
     Existing rows are left untouched except domain is backfilled if missing.
     """
+    # Build lookup of existing facilities in ONE query instead of N
+    existing_rows = (await db.execute(select(Scan))).scalars().all()
+    existing_map: dict[tuple[str, str], Scan] = {}
+    for row in existing_rows:
+        key = (
+            (row.facility_name or "").strip().lower(),
+            (row.facility_address or "").strip().lower(),
+        )
+        existing_map[key] = row
+
     results = []
     for item in req.facilities:
-        # Check for existing facility by name + address (case-insensitive)
-        q = select(Scan).where(
-            func.lower(Scan.facility_name) == (item.name or "").strip().lower(),
-            func.lower(func.coalesce(Scan.facility_address, ""))
-            == (item.address or "").strip().lower(),
+        key = (
+            (item.name or "").strip().lower(),
+            (item.address or "").strip().lower(),
         )
-        existing = (await db.execute(q)).scalar_one_or_none()
+        existing = existing_map.get(key)
 
         if existing:
-            # Backfill domain only if the existing row has none
             if not existing.domain and item.domain:
                 existing.domain = item.domain
-            await db.flush()
             results.append(ScanSubmitted(scan_id=existing.id, status=existing.status))
         else:
             scan = Scan(
@@ -165,6 +171,7 @@ async def import_facilities(req: BulkImportRequest, db: AsyncSession = Depends(g
             )
             db.add(scan)
             await db.flush()
+            existing_map[key] = scan  # Prevent dupes within same batch
             results.append(ScanSubmitted(scan_id=scan.id, status="pending"))
 
     await db.commit()

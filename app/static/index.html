@@ -237,7 +237,7 @@
         <!-- CSV tab -->
         <div id="import-panel-csv" class="hidden">
           <p class="text-sm text-gray-400 mb-2">Upload a CSV file with columns: <code class="text-xs bg-gray-800 px-1 rounded">Name, Address, Domain</code></p>
-          <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-700 rounded-lg cursor-pointer hover:border-gray-500 transition bg-gray-800/50">
+          <label id="csv-drop-zone" class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-700 rounded-lg cursor-pointer hover:border-gray-500 transition bg-gray-800/50">
             <div id="csv-upload-label" class="flex flex-col items-center justify-center py-4">
               <svg class="w-8 h-8 mb-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
               <p class="text-sm text-gray-400">Click to upload CSV</p>
@@ -2330,8 +2330,7 @@ function parseCsvText(text) {
   return items;
 }
 
-function handleCsvFile(e) {
-  const file = e.target.files[0];
+function loadCsvFile(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
@@ -2343,6 +2342,10 @@ function handleCsvFile(e) {
     updateImportCount();
   };
   reader.readAsText(file);
+}
+
+function handleCsvFile(e) {
+  loadCsvFile(e.target.files[0]);
 }
 
 function updateImportCount() {
@@ -2367,16 +2370,28 @@ async function submitImport() {
 
   const btn = document.getElementById('import-submit-btn');
   btn.disabled = true;
-  btn.textContent = 'Importing...';
 
+  const CHUNK = 200;
+  let imported = 0;
   try {
-    const res = await api('POST', '/api/scan/import', { facilities: items });
-    toast(`Imported ${res.length} facilit${res.length === 1 ? 'y' : 'ies'}`);
+    for (let i = 0; i < items.length; i += CHUNK) {
+      const chunk = items.slice(i, i + CHUNK);
+      btn.textContent = items.length > CHUNK
+        ? `Importing ${i}/${items.length}...`
+        : 'Importing...';
+      const res = await api('POST', '/api/scan/import', { facilities: chunk });
+      imported += res.length;
+    }
+    toast(`Imported ${imported} facilit${imported === 1 ? 'y' : 'ies'}`);
     closeImportModal();
     S.offset = 0;
     fetchScans();
   } catch (e) {
-    toast('Import failed: ' + e.message, 'error');
+    if (imported > 0) {
+      toast(`Imported ${imported}/${items.length}, then failed: ${e.message}`, 'error');
+    } else {
+      toast('Import failed: ' + e.message, 'error');
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Import';
@@ -2427,6 +2442,26 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('import-btn').addEventListener('click', openImportModal);
   document.getElementById('import-textarea').addEventListener('input', updateImportCount);
   document.getElementById('import-csv-input').addEventListener('change', handleCsvFile);
+
+  // Drag-and-drop for CSV upload
+  const dropZone = document.getElementById('csv-drop-zone');
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('border-blue-500', 'bg-blue-900/20');
+  });
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('border-blue-500', 'bg-blue-900/20');
+  });
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('border-blue-500', 'bg-blue-900/20');
+    const file = e.dataTransfer.files[0];
+    if (file && (file.name.endsWith('.csv') || file.type === 'text/csv')) {
+      loadCsvFile(file);
+    } else {
+      toast('Please drop a .csv file', 'error');
+    }
+  });
 
   // Select all checkbox
   document.getElementById('select-all').addEventListener('change', (e) => {
