@@ -128,10 +128,20 @@ async def detect_bins_in_chunk(
 
     Returns dict with parsed AI response + metadata, or error info on failure.
     """
+    # Pre-calculate scale and expected bin dimensions in pixels
+    meters_per_pixel = width_m / width_px if width_px > 0 else 0
+    bin_width_px_est = round(2.44 / meters_per_pixel) if meters_per_pixel > 0 else 0
+    bin_len_min_px = round(4.0 / meters_per_pixel) if meters_per_pixel > 0 else 0
+    bin_len_max_px = round(8.0 / meters_per_pixel) if meters_per_pixel > 0 else 0
+
     prompt = prompt_template.replace("{image_width_m}", str(round(width_m, 1)))
     prompt = prompt.replace("{image_height_m}", str(round(height_m, 1)))
     prompt = prompt.replace("{image_width_px}", str(width_px))
     prompt = prompt.replace("{image_height_px}", str(height_px))
+    prompt = prompt.replace("{meters_per_pixel}", str(round(meters_per_pixel, 4)))
+    prompt = prompt.replace("{bin_width_px}", str(bin_width_px_est))
+    prompt = prompt.replace("{bin_length_min_px}", str(bin_len_min_px))
+    prompt = prompt.replace("{bin_length_max_px}", str(bin_len_max_px))
 
     if not include_reasoning:
         import re as _re
