@@ -1086,7 +1086,7 @@ function renderDetail(scan) {
         const m = ss.filename.match(/bin_chunk_(\d+)_(\d+)/);
         if (m) {
           const col = parseInt(m[1]), row = parseInt(m[2]);
-          typeLabel = `Chunk c${col}r${row}`;
+          typeLabel = `c${col}r${row}`;
           // Find chunk result from bin_detection step
           if (trace && trace.steps) {
             const binStep = trace.steps.find(s => s.step_name === 'bin_detection');
@@ -1123,9 +1123,10 @@ function renderDetail(scan) {
           <div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}${badges ? '<br>' + badges : ''}</div>
         </div>`;
       } else {
-        const chunkLabel = chunkInfo
-          ? `<div class="text-sm text-gray-300 mt-1">${esc(typeLabel)} — ${chunkInfo.bins} bin${chunkInfo.bins !== 1 ? 's' : ''}, ${chunkInfo.confidence}% conf</div>`
-          : `<div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}</div>`;
+        let chunkLabel = `<div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}</div>`;
+        if (chunkInfo) {
+          chunkLabel += `<div class="text-sm text-gray-300">${esc(typeLabel)} — ${chunkInfo.bins} bin${chunkInfo.bins !== 1 ? 's' : ''}, ${chunkInfo.confidence}% conf</div>`;
+        }
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null, null)" title="Click to enlarge">
             <img src="${thumbSrc}" alt="${esc(typeLabel)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
           ${chunkLabel}
