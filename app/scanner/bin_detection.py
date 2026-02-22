@@ -352,18 +352,18 @@ async def run_bin_detection(
         parsed = result["parsed"]
         chunk_bin_present = parsed.get("bin_present", False)
         chunk_bins = parsed.get("bins", [])
-        # Derive chunk confidence from per-bin confidences (model has no top-level field)
-        bin_confs = [b.get("confidence", 0) for b in chunk_bins if b.get("confidence")]
-        chunk_confidence = max(bin_confs) if bin_confs else 0
+
+        # Count only bins meeting the confidence threshold
+        bins_above = [b for b in chunk_bins if b.get("confidence", 0) >= min_confidence]
 
         chunk_result = {
             "col": chunk["col"], "row": chunk["row"],
             "status": "success",
             "bin_present": chunk_bin_present,
-            "total_bins": parsed.get("total_bins", 0),
-            "filled_or_partial_count": parsed.get("filled_or_partial_count", 0),
-            "empty_or_unclear_count": parsed.get("empty_or_unclear_count", 0),
-            "overall_confidence": chunk_confidence,
+            "total_bins": len(bins_above),
+            "filled_or_partial_count": sum(1 for b in bins_above if b.get("fill_status") == "filled_or_partial"),
+            "empty_or_unclear_count": sum(1 for b in bins_above if b.get("fill_status") != "filled_or_partial"),
+            "overall_confidence": max((b.get("confidence", 0) for b in bins_above), default=0),
             "bins": chunk_bins,
             "reasoning": parsed.get("reasoning", ""),
             "raw_response": result.get("raw_response", ""),
