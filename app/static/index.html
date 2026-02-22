@@ -569,7 +569,7 @@
             </div>
             <textarea id="set-bin-detection-prompt" rows="10"
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none font-mono leading-relaxed"></textarea>
-            <p class="text-xs text-gray-600 mt-1">Sent with each image chunk. Supports {image_width_m}, {image_height_m} placeholders.</p>
+            <p class="text-xs text-gray-600 mt-1">Sent with each image chunk. Supports {image_width_m}, {image_height_m}, {image_width_px}, {image_height_px}, {meters_per_pixel}, {bin_width_px}, {bin_length_min_px}, {bin_length_max_px} placeholders.</p>
           </div>
         </div>
 
@@ -1394,10 +1394,6 @@ function renderDetail(scan) {
             html += `<div class="text-gray-300 font-medium">Bin ${i + 1}:</div>`;
             html += `<div>region: ${esc(bin.region || '-')}, fill: <span class="${bin.fill_status === 'filled_or_partial' ? 'text-yellow-400' : 'text-gray-500'}">${esc(bin.fill_status || '-')}</span>, conf: ${bin.confidence || 0}%</div>`;
             if (bin.evidence) html += `<div class="text-gray-500 italic">evidence: "${esc(bin.evidence)}"</div>`;
-            if (bin.bbox_relative) {
-              const bb = bin.bbox_relative;
-              html += `<div class="text-gray-600">bbox: x=${bb.x}, y=${bb.y}, w=${bb.w}, h=${bb.h}</div>`;
-            }
             html += `</div>`;
           });
         }
