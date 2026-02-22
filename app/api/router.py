@@ -126,6 +126,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         bin_detection_prompt=settings_dict.get("bin_detection_prompt", ""),
         bin_detection_model=settings_dict.get("bin_detection_model", ""),
         bin_detection_max_chunk_m=settings_dict.get("bin_detection_max_chunk_m", ""),
+        bin_detection_min_confidence=settings_dict.get("bin_detection_min_confidence", ""),
         # Performance (per-scan, dynamic)
         tile_concurrency=settings_dict.get("tile_concurrency", ""),
         tile_delay_s=settings_dict.get("tile_delay_s", ""),
