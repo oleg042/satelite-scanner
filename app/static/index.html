@@ -1537,8 +1537,7 @@ async function detectBinsSelected() {
     });
     S.selected.clear();
     updateSelectionBtns();
-    fetchScans();
-    renderTable();
+    await fetchScans();
   } catch (e) {
     ids.forEach(id => {
       const scan = S.scans.find(s => s.id === id);
@@ -1590,10 +1589,11 @@ async function fetchScans() {
 
   try {
     const newScans = await api('GET', `/api/scans?${params}`);
-    // Invalidate trace cache for scans whose status changed (e.g. completed a re-scan)
-    const oldMap = Object.fromEntries(S.scans.map(s => [s.id, s.status]));
+    // Invalidate trace cache for scans whose status or bin detection changed
+    const oldMap = Object.fromEntries(S.scans.map(s => [s.id, { status: s.status, bin: s.bin_detection_status }]));
     newScans.forEach(s => {
-      if (oldMap[s.id] && oldMap[s.id] !== s.status) {
+      const old = oldMap[s.id];
+      if (old && (old.status !== s.status || old.bin !== s.bin_detection_status)) {
         delete S.expanded[s.id];
         if (S.expandedOpen[s.id]) {
           api('GET', `/api/scan/${s.id}/steps`)
@@ -1605,7 +1605,7 @@ async function fetchScans() {
     const oldScans = S.scans;
     S.scans = newScans;
     const changed = newScans.length !== oldScans.length ||
-      newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status);
+      newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status || s.bin_count !== oldScans[i]?.bin_count);
     if (changed) renderTable();
     managePoll();
   } catch (e) {
