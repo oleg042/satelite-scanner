@@ -110,6 +110,8 @@ async def detect_bins_in_chunk(
     chunk_image_b64: str,
     width_m: float,
     height_m: float,
+    width_px: int,
+    height_px: int,
     api_key: str,
     model: str,
     prompt_template: str,
@@ -121,6 +123,8 @@ async def detect_bins_in_chunk(
     """
     prompt = prompt_template.replace("{image_width_m}", str(round(width_m, 1)))
     prompt = prompt.replace("{image_height_m}", str(round(height_m, 1)))
+    prompt = prompt.replace("{image_width_px}", str(width_px))
+    prompt = prompt.replace("{image_height_px}", str(height_px))
 
     max_retries = 3
     last_error = None
@@ -278,6 +282,7 @@ async def run_bin_detection(
         label = f"c{chunk['col']}r{chunk['row']}"
         tasks.append(detect_bins_in_chunk(
             b64, chunk["width_m"], chunk["height_m"],
+            chunk["px_w"], chunk["px_h"],
             api_key, model, prompt_template, label,
         ))
 
