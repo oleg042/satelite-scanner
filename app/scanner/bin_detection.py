@@ -526,7 +526,8 @@ async def execute_bin_detection(
         include_reasoning=include_reasoning,
     )
 
-    # Update scan fields
+    # Update scan fields (bump started_at so re-scans sort to top of list)
+    scan.started_at = datetime.now(timezone.utc)
     scan.bin_present = bin_result.bin_present
     scan.bin_count = bin_result.total_bins
     scan.bin_filled_count = bin_result.filled_or_partial_count
