@@ -11,12 +11,18 @@ import io
 import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from openai import OpenAI
 from PIL import Image
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models import Scan, Screenshot, ScreenshotType, ScanStep
+from app.scanner.utils import save_image, record_screenshot, record_step
 from app.scanner.vision import _parse_json_response
 
 logger = logging.getLogger(__name__)
@@ -416,3 +422,193 @@ async def run_bin_detection(
         total_tokens=total_tokens,
         raw_responses=raw_responses,
     )
+
+
+async def execute_bin_detection(
+    scan: Scan,
+    db: AsyncSession,
+    final_image_path: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    max_chunk_m: float,
+    min_confidence: int,
+    step_num_start: int,
+    volume_path: str,
+    clean_old: bool = True,
+) -> dict:
+    """Full bin detection workflow: chunk, detect, save screenshots, record steps.
+
+    Used by both the API "Detect Bins" button and the full pipeline scan.
+
+    Returns a summary dict with detection results.
+    """
+    step_num = step_num_start
+
+    # Optionally clean old bin detection data (API re-run path)
+    if clean_old:
+        old_bin_ss = await db.execute(
+            select(Screenshot).where(
+                Screenshot.scan_id == scan.id,
+                Screenshot.type == ScreenshotType.bin_chunk,
+            )
+        )
+        for old_ss in old_bin_ss.scalars().all():
+            old_path = os.path.join(volume_path, old_ss.file_path)
+            try:
+                os.unlink(old_path)
+            except OSError:
+                pass
+        await db.execute(
+            delete(Screenshot).where(
+                Screenshot.scan_id == scan.id,
+                Screenshot.type == ScreenshotType.bin_chunk,
+            )
+        )
+        await db.execute(
+            delete(ScanStep).where(
+                ScanStep.scan_id == scan.id,
+                ScanStep.step_name.in_(["bin_detection", "image_chunking"]),
+            )
+        )
+        await db.commit()
+
+    # Step A: Image Chunking
+    chunk_grid = calculate_chunk_grid(
+        scan.image_width, scan.image_height,
+        scan.bbox_width_m, scan.bbox_height_m,
+        max_chunk_m,
+    )
+    cols = max(c["col"] for c in chunk_grid) + 1 if chunk_grid else 0
+    rows = max(c["row"] for c in chunk_grid) + 1 if chunk_grid else 0
+
+    await record_step(
+        db, scan.id, step_num, "image_chunking",
+        status="completed",
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        duration_ms=0,
+        input_summary=json.dumps({
+            "image_px": f"{scan.image_width}x{scan.image_height}",
+            "bbox_m": f"{round(scan.bbox_width_m, 1)}x{round(scan.bbox_height_m, 1)}",
+            "max_chunk_m": max_chunk_m,
+        }),
+        output_summary=json.dumps({
+            "grid": f"{cols}x{rows}",
+            "chunk_count": len(chunk_grid),
+            "chunks": chunk_grid,
+        }),
+        decision=(
+            f"Split {round(scan.bbox_width_m, 1)}m x {round(scan.bbox_height_m, 1)}m image into "
+            f"{len(chunk_grid)} chunks ({cols}x{rows} grid, max {max_chunk_m}m per chunk)"
+        ),
+    )
+
+    # Step B: Bin Detection
+    step_num += 1
+    bin_step_started = datetime.now(timezone.utc)
+
+    bin_result = await run_bin_detection(
+        final_image_path,
+        scan.bbox_width_m, scan.bbox_height_m,
+        api_key, model, prompt, max_chunk_m,
+        min_confidence=min_confidence,
+    )
+
+    # Update scan fields
+    scan.bin_present = bin_result.bin_present
+    scan.bin_count = bin_result.total_bins
+    scan.bin_filled_count = bin_result.filled_or_partial_count
+    scan.bin_empty_count = bin_result.empty_or_unclear_count
+    scan.bin_confidence = bin_result.overall_confidence
+
+    if bin_result.chunks_failed > 0 and bin_result.chunks_failed < bin_result.chunks_total:
+        scan.bin_detection_status = "partial"
+    elif bin_result.chunks_failed >= bin_result.chunks_total:
+        scan.bin_detection_status = "failed"
+    else:
+        scan.bin_detection_status = "completed"
+
+    # Save chunk images where bins were found
+    if bin_result.bin_present:
+        final_img = Image.open(final_image_path)
+        for cr in bin_result.chunk_results:
+            if cr.get("status") == "success" and cr.get("bin_present"):
+                matching = [c for c in chunk_grid
+                            if c["col"] == cr["col"] and c["row"] == cr["row"]]
+                if not matching:
+                    continue
+                chunk_desc = matching[0]
+                box = (chunk_desc["px_x"], chunk_desc["px_y"],
+                       chunk_desc["px_x"] + chunk_desc["px_w"],
+                       chunk_desc["px_y"] + chunk_desc["px_h"])
+                chunk_crop = final_img.crop(box)
+                suffix = f"bin_chunk_{cr['col']}_{cr['row']}"
+                rel_path_c, filename_c, abs_path_c = save_image(
+                    chunk_crop, scan.facility_name, suffix,
+                    scan.zoom or 20, scan.id, volume_path,
+                )
+                await record_screenshot(
+                    db, scan.id, ScreenshotType.bin_chunk,
+                    filename_c, rel_path_c, abs_path_c,
+                    scan.zoom or 20,
+                    chunk_crop.width, chunk_crop.height,
+                )
+                chunk_crop.close()
+        final_img.close()
+
+    bin_completed = datetime.now(timezone.utc)
+    bin_elapsed = int((bin_completed - bin_step_started).total_seconds() * 1000)
+
+    bin_decision = (
+        f"Detected {bin_result.total_bins} bins "
+        f"({bin_result.filled_or_partial_count} filled, "
+        f"{bin_result.empty_or_unclear_count} empty) "
+        f"across {bin_result.chunks_total} chunks. "
+        f"Confidence: {bin_result.overall_confidence}%"
+    )
+    if bin_result.chunks_failed > 0:
+        bin_decision += f" ({bin_result.chunks_failed} chunks failed)"
+
+    await record_step(
+        db, scan.id, step_num, "bin_detection",
+        status="completed",
+        started_at=bin_step_started,
+        completed_at=bin_completed,
+        duration_ms=bin_elapsed,
+        input_summary=json.dumps({
+            "chunk_count": bin_result.chunks_total,
+            "model": model,
+        }),
+        output_summary=json.dumps({
+            "bin_present": bin_result.bin_present,
+            "total_bins": bin_result.total_bins,
+            "filled_or_partial_count": bin_result.filled_or_partial_count,
+            "empty_or_unclear_count": bin_result.empty_or_unclear_count,
+            "overall_confidence": bin_result.overall_confidence,
+            "bins": bin_result.bins,
+            "chunks_with_bins": bin_result.chunks_with_bins,
+            "chunks_failed": bin_result.chunks_failed,
+            "notes": bin_result.notes,
+            "chunk_results": bin_result.chunk_results,
+        }),
+        decision=bin_decision,
+        ai_model=model,
+        ai_tokens_prompt=bin_result.total_prompt_tokens,
+        ai_tokens_completion=bin_result.total_completion_tokens,
+        ai_tokens_total=bin_result.total_tokens,
+    )
+    await db.commit()
+
+    return {
+        "scan_id": str(scan.id),
+        "status": scan.bin_detection_status,
+        "bin_present": bin_result.bin_present,
+        "total_bins": bin_result.total_bins,
+        "filled_or_partial_count": bin_result.filled_or_partial_count,
+        "empty_or_unclear_count": bin_result.empty_or_unclear_count,
+        "overall_confidence": bin_result.overall_confidence,
+        "chunks_total": bin_result.chunks_total,
+        "chunks_with_bins": bin_result.chunks_with_bins,
+        "chunks_failed": bin_result.chunks_failed,
+    }
