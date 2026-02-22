@@ -8,10 +8,10 @@
 <style>
   @keyframes pulse-bg { 0%,100%{opacity:1} 50%{opacity:.6} }
   .pulse-badge { animation: pulse-bg 1.5s ease-in-out infinite; }
-  th[data-sort]::after { content: ' \25B4\25BE'; font-size: .55em; opacity: .35; }
-  th[data-sort]:hover::after { opacity: .6; }
-  .sort-asc::after { content: ' \25B2' !important; font-size: .65em !important; opacity: 1 !important; }
-  .sort-desc::after { content: ' \25BC' !important; font-size: .65em !important; opacity: 1 !important; }
+  th[data-sort]::after { content: ' \2191\2193'; font-size: .85em; opacity: .4; }
+  th[data-sort]:hover::after { opacity: .7; }
+  .sort-asc::after { content: ' \2191' !important; opacity: 1 !important; }
+  .sort-desc::after { content: ' \2193' !important; opacity: 1 !important; }
   .toast{animation:slideIn .3s ease}
   @keyframes slideIn{from{transform:translateY(-1rem);opacity:0}to{transform:translateY(0);opacity:1}}
   .nav-item{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:.375rem;font-size:.875rem;transition:all .15s;cursor:pointer;color:#9ca3af}
