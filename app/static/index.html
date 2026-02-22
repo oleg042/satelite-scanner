@@ -128,6 +128,10 @@
         <option value="true">Bins Found</option>
         <option value="false">No Bins</option>
       </select>
+      <button id="group-toggle-btn" title="Toggle company grouping"
+        class="bg-gray-800 border-2 border-blue-500 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
+        Grouped
+      </button>
       <button id="import-btn" title="Bulk import facilities"
         class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
         Import
@@ -640,6 +644,8 @@ const S = {
   // Geocoding resolved state
   resolved: null, // { lat, lng, display_name, source }
   settings: {},
+  groupByCompany: true,
+  _detectingIds: new Set(),
 };
 
 // --- Router ---
@@ -706,8 +712,8 @@ function statusBadge(scan, scanId) {
   const status = typeof scan === 'string' ? scan : scan.status;
   const binStatus = typeof scan === 'object' ? scan.bin_detection_status : null;
 
-  // Temporary detecting state — pulsing purple badge
-  if (typeof scan === 'object' && scan._detecting) {
+  // Temporary detecting state — pulsing purple badge (uses durable Set, survives fetchScans)
+  if (typeof scan === 'object' && S._detectingIds.has(scan.id)) {
     return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-purple-600 text-purple-100 pulse-badge">detecting bins</span>`;
   }
 
@@ -860,8 +866,54 @@ function renderTable() {
   }
   empty.classList.add('hidden');
 
+  // Build display order: grouped by company or flat
+  // In grouped mode, hide sort indicators since grouping overrides column sort
+  if (S.groupByCompany) {
+    document.querySelectorAll('th[data-sort]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+  } else if (S.sortField) {
+    document.querySelectorAll('th[data-sort]').forEach(h => {
+      h.classList.remove('sort-asc', 'sort-desc');
+      if (h.dataset.sort === S.sortField) h.classList.add(S.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+    });
+  }
+
+  let displayScans;
+  if (S.groupByCompany) {
+    displayScans = [...sorted].sort((a, b) => {
+      const nameA = (a.facility_name || '').toLowerCase();
+      const nameB = (b.facility_name || '').toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      // Within same company, sort by date descending
+      const dateA = a.started_at ? new Date(a.started_at).getTime() : 0;
+      const dateB = b.started_at ? new Date(b.started_at).getTime() : 0;
+      return dateB - dateA;
+    });
+  } else {
+    displayScans = sorted;
+  }
+
   let html = '';
-  sorted.forEach((scan, i) => {
+  let currentGroup = null;
+  displayScans.forEach((scan, i) => {
+    // Emit group header when company name changes (grouped mode only)
+    if (S.groupByCompany) {
+      const groupKey = (scan.facility_name || '-').toLowerCase();
+      if (groupKey !== currentGroup) {
+        currentGroup = groupKey;
+        // Count facilities in this group
+        const groupCount = displayScans.filter(s => (s.facility_name || '-').toLowerCase() === groupKey).length;
+        const groupDomain = displayScans.find(s => (s.facility_name || '-').toLowerCase() === groupKey && s.domain)?.domain || '';
+        html += `<tr class="bg-gray-800/70 border-l-2 border-blue-500">
+          <td colspan="11" class="px-3 py-2">
+            <span class="font-bold text-gray-200">${esc(scan.facility_name || '-')}</span>
+            <span class="text-gray-500 text-xs ml-2">${groupCount} facilit${groupCount === 1 ? 'y' : 'ies'}</span>
+            ${groupDomain ? `<span class="text-gray-600 text-xs ml-2">${esc(groupDomain)}</span>` : ''}
+          </td>
+        </tr>`;
+      }
+    }
+
     const rowNum = S.offset + i + 1;
     const isOpen = S.expandedOpen[scan.id];
     const checked = S.selected.has(scan.id) ? 'checked' : '';
@@ -1456,6 +1508,14 @@ function renderDetail(scan) {
       html += '</div></details>';
     }
   } else if (!trace) {
+    // Auto-fetch trace if row is open but trace is missing (safety net)
+    if (!S._fetchingTrace?.[scan.id]) {
+      S._fetchingTrace = S._fetchingTrace || {};
+      S._fetchingTrace[scan.id] = true;
+      api('GET', `/api/scan/${scan.id}/steps`)
+        .then(t => { S.expanded[scan.id] = t; delete S._fetchingTrace[scan.id]; renderTable(); })
+        .catch(() => { S.expanded[scan.id] = { steps: [], error: 'Failed to load' }; delete S._fetchingTrace[scan.id]; renderTable(); });
+    }
     html += '<div class="text-sm text-gray-500">Loading trace...</div>';
   }
 
@@ -1574,7 +1634,7 @@ async function scanSelected() {
   }
 }
 
-async function detectBinsSelected() {
+function detectBinsSelected() {
   const ids = [...S.selected];
   if (ids.length === 0) return;
 
@@ -1582,39 +1642,42 @@ async function detectBinsSelected() {
   btn.disabled = true;
   btn.textContent = 'Detecting...';
 
-  // Mark selected scans as "detecting" for UI feedback
-  ids.forEach(id => {
-    const scan = S.scans.find(s => s.id === id);
-    if (scan) scan._detecting = true;
-  });
+  // Track detecting IDs in durable state (survives fetchScans replacing S.scans)
+  ids.forEach(id => S._detectingIds.add(id));
+
+  // Clear selection immediately so user can keep working
+  S.selected.clear();
+  updateSelectionBtns();
   renderTable();
 
-  try {
-    const res = await api('POST', '/api/scans/detect-bins', { scan_ids: ids });
-    let msg = `Bin detection: ${res.processed} processed`;
-    if (res.skipped > 0) msg += `, ${res.skipped} skipped`;
-    toast(msg);
-    // Clear detecting flag and invalidate trace cache
-    ids.forEach(id => {
-      const scan = S.scans.find(s => s.id === id);
-      if (scan) delete scan._detecting;
-      delete S.expanded[id];
-    });
-    S.selected.clear();
-    updateSelectionBtns();
-    await fetchScans();
-  } catch (e) {
-    ids.forEach(id => {
-      const scan = S.scans.find(s => s.id === id);
-      if (scan) delete scan._detecting;
-    });
-    toast('Bin detection failed: ' + e.message, 'error');
-    renderTable();
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
-    updateSelectionBtns();
+  // Ensure polling is active to pick up intermediate changes
+  if (!S.pollTimer) {
+    S.pollTimer = setInterval(fetchScans, 5000);
   }
+
+  // Fire-and-forget: API call runs in background
+  api('POST', '/api/scans/detect-bins', { scan_ids: ids })
+    .then(res => {
+      let msg = `Bin detection: ${res.processed} processed`;
+      if (res.skipped > 0) msg += `, ${res.skipped} skipped`;
+      toast(msg);
+      // Clear detecting flags and invalidate trace cache
+      ids.forEach(id => {
+        S._detectingIds.delete(id);
+        delete S.expanded[id];
+      });
+      fetchScans();
+    })
+    .catch(e => {
+      ids.forEach(id => S._detectingIds.delete(id));
+      toast('Bin detection failed: ' + e.message, 'error');
+      renderTable();
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
+      updateSelectionBtns();
+    });
 }
 
 async function scanAllPending() {
@@ -1682,7 +1745,7 @@ async function fetchScans() {
 const TERMINAL = new Set(['completed', 'failed', 'skipped', 'pending']);
 
 function managePoll() {
-  const hasActive = S.scans.some(s => !TERMINAL.has(s.status));
+  const hasActive = S.scans.some(s => !TERMINAL.has(s.status)) || S._detectingIds.size > 0;
   if (hasActive && !S.pollTimer) {
     S.pollTimer = setInterval(fetchScans, 5000);
   } else if (!hasActive && S.pollTimer) {
@@ -2307,6 +2370,16 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
   document.getElementById('filter-bins').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+
+  // Group-by-company toggle
+  document.getElementById('group-toggle-btn').addEventListener('click', () => {
+    S.groupByCompany = !S.groupByCompany;
+    const btn = document.getElementById('group-toggle-btn');
+    btn.textContent = S.groupByCompany ? 'Grouped' : 'Flat';
+    btn.classList.toggle('border-blue-500', S.groupByCompany);
+    btn.classList.toggle('border-gray-700', !S.groupByCompany);
+    renderTable();
+  });
 
   // Import modal
   document.getElementById('import-btn').addEventListener('click', openImportModal);
