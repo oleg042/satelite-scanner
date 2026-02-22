@@ -888,7 +888,32 @@ function renderTable() {
       html += `</td></tr>`;
     }
   });
+  // Snapshot open <details> inside expanded rows before DOM replacement
+  const openDetails = new Map();
+  tbody.querySelectorAll('tr[data-id]').forEach(row => {
+    const id = row.dataset.id;
+    if (!S.expandedOpen[id]) return;
+    const next = row.nextElementSibling;
+    if (!next) return;
+    const indices = [];
+    next.querySelectorAll('details').forEach((d, i) => { if (d.open) indices.push(i); });
+    if (indices.length) openDetails.set(id, indices);
+  });
+
   tbody.innerHTML = html;
+
+  // Restore open <details> state after DOM rebuild
+  if (openDetails.size) {
+    tbody.querySelectorAll('tr[data-id]').forEach(row => {
+      const id = row.dataset.id;
+      const indices = openDetails.get(id);
+      if (!indices) return;
+      const next = row.nextElementSibling;
+      if (!next) return;
+      const details = next.querySelectorAll('details');
+      indices.forEach(i => { if (details[i]) details[i].open = true; });
+    });
+  }
 
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
     row.addEventListener('click', () => {
