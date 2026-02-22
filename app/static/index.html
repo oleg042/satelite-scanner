@@ -151,7 +151,10 @@
         class="bg-green-700 hover:bg-green-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">
         Scan All Pending
       </button>
-      <span id="scan-count" class="text-sm text-gray-500 ml-auto">0 scans</span>
+      <div id="scan-stats" class="ml-auto text-right text-sm leading-snug">
+        <div><span class="text-gray-500">Facilities</span> <span id="stat-total" class="text-gray-300 font-medium">0</span> <span class="text-gray-600 mx-1">&middot;</span> <span class="text-gray-500">Completed</span> <span id="stat-completed" class="text-gray-300 font-medium">0</span></div>
+        <div><span class="text-gray-500">Bins Found</span> <span id="stat-bins" class="text-green-400 font-medium">0</span></div>
+      </div>
       <button id="scan-selected-btn" disabled
         class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Scan Selected (<span id="scan-selected-count">0</span>)
@@ -1033,7 +1036,12 @@ function renderTable() {
     selectAll.indeterminate = sorted.some(s => S.selected.has(s.id)) && !selectAll.checked;
   }
 
-  document.getElementById('scan-count').textContent = `${sorted.length} scan${sorted.length !== 1 ? 's' : ''}`;
+  // Update stats
+  const completedCount = sorted.filter(s => s.status === 'completed').length;
+  const binsFoundCount = sorted.filter(s => s.bin_present === true).length;
+  document.getElementById('stat-total').textContent = sorted.length;
+  document.getElementById('stat-completed').textContent = completedCount;
+  document.getElementById('stat-bins').textContent = binsFoundCount;
 
   document.getElementById('prev-btn').disabled = S.offset === 0;
   document.getElementById('next-btn').disabled = sorted.length < S.limit;
