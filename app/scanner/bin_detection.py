@@ -436,6 +436,7 @@ async def execute_bin_detection(
     step_num_start: int,
     volume_path: str,
     clean_old: bool = True,
+    delete_final_image: bool = False,
 ) -> dict:
     """Full bin detection workflow: chunk, detect, save screenshots, record steps.
 
@@ -602,6 +603,22 @@ async def execute_bin_detection(
         ai_tokens_total=bin_result.total_tokens,
     )
     await db.commit()
+
+    # Optionally delete the final image to save storage
+    if delete_final_image:
+        try:
+            os.unlink(final_image_path)
+            logger.info("Deleted final image for scan %s: %s", scan.id, final_image_path)
+        except OSError:
+            pass
+        # Remove the screenshot DB record so the UI doesn't show a broken image
+        await db.execute(
+            delete(Screenshot).where(
+                Screenshot.scan_id == scan.id,
+                Screenshot.type == ScreenshotType.final,
+            )
+        )
+        await db.commit()
 
     return {
         "scan_id": str(scan.id),

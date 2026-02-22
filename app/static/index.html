@@ -536,6 +536,14 @@
                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
               <p class="text-xs text-gray-600 mt-1">Bins below this confidence are excluded from counts (0-100)</p>
             </div>
+            <div>
+              <label class="flex items-center gap-2 cursor-pointer mt-2">
+                <input id="set-bin-delete-final" type="checkbox"
+                  class="rounded bg-gray-800 border-gray-600 cursor-pointer">
+                <span class="text-sm text-gray-300">Delete Final Image After Detection</span>
+              </label>
+              <p class="text-xs text-gray-600 mt-1">Remove the large final image from storage once bin detection completes. Chunk screenshots are kept.</p>
+            </div>
           </div>
           <div>
             <div class="flex items-center justify-between mb-1.5">
@@ -1673,6 +1681,7 @@ async function loadSettings() {
     document.getElementById('set-bin-detection-model').value = s.bin_detection_model || '';
     document.getElementById('set-bin-max-chunk').value = s.bin_detection_max_chunk_m || '';
     document.getElementById('set-bin-min-confidence').value = s.bin_detection_min_confidence || '50';
+    document.getElementById('set-bin-delete-final').checked = (s.bin_delete_final_image || 'false') === 'true';
     document.getElementById('set-bin-detection-prompt').value = s.bin_detection_prompt || '';
     // Performance
     document.getElementById('set-tile-delay').value = s.tile_delay_s || '';
@@ -1737,6 +1746,7 @@ async function saveSettings(e) {
   if (bmc) body.bin_detection_max_chunk_m = bmc;
   const bmnc = document.getElementById('set-bin-min-confidence').value.trim();
   if (bmnc) body.bin_detection_min_confidence = bmnc;
+  body.bin_delete_final_image = document.getElementById('set-bin-delete-final').checked ? 'true' : 'false';
   const bdp = document.getElementById('set-bin-detection-prompt').value.trim();
   if (bdp) body.bin_detection_prompt = bdp;
   // Performance

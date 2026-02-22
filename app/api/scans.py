@@ -309,6 +309,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         min_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_min_confidence", "50"))))
     except (ValueError, TypeError):
         min_confidence = 50
+    delete_final = (await _get_setting(db, "bin_delete_final_image", "false")).lower() == "true"
 
     # Determine step number (after existing steps)
     max_step_result = await db.execute(
@@ -326,6 +327,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         step_num_start=max_step + 1,
         volume_path=app_settings.volume_path,
         clean_old=True,
+        delete_final_image=delete_final,
     )
 
 

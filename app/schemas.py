@@ -56,6 +56,7 @@ class SettingsUpdate(BaseModel):
     bin_detection_model: Optional[str] = None
     bin_detection_max_chunk_m: Optional[str] = None
     bin_detection_min_confidence: Optional[str] = None
+    bin_delete_final_image: Optional[str] = None
     # Performance (per-scan, dynamic)
     tile_concurrency: Optional[str] = None
     tile_delay_s: Optional[str] = None
@@ -156,6 +157,7 @@ class SettingsResponse(BaseModel):
     bin_detection_model: str = ""
     bin_detection_max_chunk_m: str = ""
     bin_detection_min_confidence: str = ""
+    bin_delete_final_image: str = ""
     # Performance (per-scan, dynamic)
     tile_concurrency: str = ""
     tile_delay_s: str = ""
