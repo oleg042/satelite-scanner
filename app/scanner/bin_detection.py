@@ -213,7 +213,7 @@ def _call_openai_vision(image_b64: str, prompt: str, api_key: str, model: str) -
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                    "image_url": {"url": f"data:image/png;base64,{image_b64}", "detail": "high"},
                 },
                 {"type": "text", "text": prompt},
             ],
@@ -239,6 +239,7 @@ async def run_bin_detection(
     model: str,
     prompt_template: str,
     max_chunk_m: float = 100.0,
+    min_confidence: int = 50,
 ) -> BinDetectionResult:
     """Run bin detection on a final satellite image.
 
@@ -343,12 +344,15 @@ async def run_bin_detection(
 
         if chunk_bin_present and chunk_bins:
             chunks_with_bins += 1
-            # Collect per-bin confidences for overall average
-            for b in chunk_bins:
-                if b.get("confidence"):
-                    confidences.append(b["confidence"])
 
             for bin_item in chunk_bins:
+                bin_conf = bin_item.get("confidence", 0)
+                # Only include bins above the confidence threshold in aggregates
+                if bin_conf < min_confidence:
+                    continue
+
+                confidences.append(bin_conf)
+
                 # Convert chunk-relative bbox to full-image-relative
                 bbox_rel = bin_item.get("bbox_relative", {})
                 full_x = (chunk["px_x"] + bbox_rel.get("x", 0) * chunk["px_w"]) / img_w
@@ -371,7 +375,7 @@ async def run_bin_detection(
                 else:
                     empty_count += 1
 
-            total_bins += len(chunk_bins)
+                total_bins += 1
 
         # Collect notes
         notes = parsed.get("notes", [])

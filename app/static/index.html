@@ -530,6 +530,12 @@
                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
               <p class="text-xs text-gray-600 mt-1">Max chunk dimension for AI analysis (50-200)</p>
             </div>
+            <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Min Bin Confidence (%)</label>
+              <input id="set-bin-min-confidence" type="number" min="0" max="100"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Bins below this confidence are excluded from counts (0-100)</p>
+            </div>
           </div>
           <div>
             <div class="flex items-center justify-between mb-1.5">
@@ -671,7 +677,15 @@ async function restartService() {
 }
 
 // --- Status badge ---
-function statusBadge(status, scanId) {
+function statusBadge(scan, scanId) {
+  const status = typeof scan === 'string' ? scan : scan.status;
+  const binStatus = typeof scan === 'object' ? scan.bin_detection_status : null;
+
+  // Temporary detecting state — pulsing purple badge
+  if (typeof scan === 'object' && scan._detecting) {
+    return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-purple-600 text-purple-100 pulse-badge">detecting bins</span>`;
+  }
+
   const map = {
     pending: 'bg-purple-700 text-purple-100',
     queued: 'bg-gray-600 text-gray-100',
@@ -686,7 +700,13 @@ function statusBadge(status, scanId) {
     skipped: 'bg-blue-700 text-blue-100',
   };
   const cls = map[status] || 'bg-gray-600 text-gray-100';
-  const label = (status || '').replace(/_/g, ' ');
+  let label = (status || '').replace(/_/g, ' ');
+
+  // Facility pipeline done but bin detection not yet run → "building found"
+  if (status === 'completed' && !binStatus) {
+    label = 'building found';
+  }
+
   if ((status === 'failed' || status === 'skipped') && scanId) {
     return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium cursor-pointer hover:brightness-125 ${cls}" onclick="event.stopPropagation(); showScanReason('${scanId}')" title="Click to see details">${label}</span>`;
   }
@@ -828,7 +848,7 @@ function renderTable() {
         ${scan.domain ? `<div class="text-gray-400 truncate max-w-[14rem]"><a href="${escAttr(scan.domain.match(/^https?:\/\//) ? scan.domain : 'https://' + scan.domain)}" target="_blank" rel="noopener" class="text-gray-400 hover:text-gray-300 no-underline" onclick="event.stopPropagation()">${esc(scan.domain)}</a></div>` : ''}
       </td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtSearchLink(scan)}</td>
-      <td class="px-3 py-2">${statusBadge(scan.status, scan.id)}</td>
+      <td class="px-3 py-2">${statusBadge(scan, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
       <td class="px-3 py-2 text-center whitespace-nowrap">${fmtBins(scan)}</td>
@@ -1522,18 +1542,35 @@ async function detectBinsSelected() {
   btn.disabled = true;
   btn.textContent = 'Detecting...';
 
+  // Mark selected scans as "detecting" for UI feedback
+  ids.forEach(id => {
+    const scan = S.scans.find(s => s.id === id);
+    if (scan) scan._detecting = true;
+  });
+  renderTable();
+
   try {
     const res = await api('POST', '/api/scans/detect-bins', { scan_ids: ids });
     let msg = `Bin detection: ${res.processed} processed`;
     if (res.skipped > 0) msg += `, ${res.skipped} skipped`;
     toast(msg);
-    // Invalidate trace cache for processed scans
-    ids.forEach(id => { delete S.expanded[id]; });
+    // Clear detecting flag and invalidate trace cache
+    ids.forEach(id => {
+      const scan = S.scans.find(s => s.id === id);
+      if (scan) delete scan._detecting;
+      delete S.expanded[id];
+    });
     S.selected.clear();
     updateSelectionBtns();
     fetchScans();
+    renderTable();
   } catch (e) {
+    ids.forEach(id => {
+      const scan = S.scans.find(s => s.id === id);
+      if (scan) delete scan._detecting;
+    });
     toast('Bin detection failed: ' + e.message, 'error');
+    renderTable();
   } finally {
     btn.disabled = false;
     btn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
@@ -1593,7 +1630,7 @@ async function fetchScans() {
     const oldScans = S.scans;
     S.scans = newScans;
     const changed = newScans.length !== oldScans.length ||
-      newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status);
+      newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status);
     if (changed) renderTable();
     managePoll();
   } catch (e) {
@@ -1646,6 +1683,7 @@ async function loadSettings() {
     document.getElementById('set-bin-detection-enabled').checked = (s.bin_detection_enabled || 'false') === 'true';
     document.getElementById('set-bin-detection-model').value = s.bin_detection_model || '';
     document.getElementById('set-bin-max-chunk').value = s.bin_detection_max_chunk_m || '';
+    document.getElementById('set-bin-min-confidence').value = s.bin_detection_min_confidence || '50';
     document.getElementById('set-bin-detection-prompt').value = s.bin_detection_prompt || '';
     // Performance
     document.getElementById('set-tile-delay').value = s.tile_delay_s || '';
@@ -1708,6 +1746,8 @@ async function saveSettings(e) {
   if (bdm) body.bin_detection_model = bdm;
   const bmc = document.getElementById('set-bin-max-chunk').value.trim();
   if (bmc) body.bin_detection_max_chunk_m = bmc;
+  const bmnc = document.getElementById('set-bin-min-confidence').value.trim();
+  if (bmnc) body.bin_detection_min_confidence = bmnc;
   const bdp = document.getElementById('set-bin-detection-prompt').value.trim();
   if (bdp) body.bin_detection_prompt = bdp;
   // Performance

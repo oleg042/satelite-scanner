@@ -133,6 +133,10 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         bin_detection_max_chunk_m = max(50, int(await _get_setting(db, "bin_detection_max_chunk_m", "100")))
     except (ValueError, TypeError):
         bin_detection_max_chunk_m = 100
+    try:
+        bin_detection_min_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_min_confidence", "50"))))
+    except (ValueError, TypeError):
+        bin_detection_min_confidence = 50
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -157,6 +161,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "bin_detection_prompt": bin_detection_prompt,
         "bin_detection_model": bin_detection_model,
         "bin_detection_max_chunk_m": bin_detection_max_chunk_m,
+        "bin_detection_min_confidence": bin_detection_min_confidence,
     }
 
 
@@ -1218,6 +1223,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     config["bin_detection_model"],
                     config["bin_detection_prompt"],
                     config["bin_detection_max_chunk_m"],
+                    min_confidence=config["bin_detection_min_confidence"],
                 )
 
                 # Update scan fields

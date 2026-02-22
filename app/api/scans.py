@@ -348,6 +348,10 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         max_chunk_m = max(50, int(await _get_setting(db, "bin_detection_max_chunk_m", "100")))
     except (ValueError, TypeError):
         max_chunk_m = 100
+    try:
+        min_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_min_confidence", "50"))))
+    except (ValueError, TypeError):
+        min_confidence = 50
 
     # Delete old bin_chunk screenshots for this scan
     old_bin_ss = await db.execute(
@@ -426,6 +430,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         final_path,
         scan.bbox_width_m, scan.bbox_height_m,
         api_key, model, prompt, max_chunk_m,
+        min_confidence=min_confidence,
     )
 
     # Update scan fields
