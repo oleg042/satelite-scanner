@@ -645,6 +645,7 @@ const S = {
   resolved: null, // { lat, lng, display_name, source }
   settings: {},
   groupByCompany: true,
+  collapsedGroups: new Set(),
   _detectingIds: new Set(),
 };
 
@@ -901,17 +902,22 @@ function renderTable() {
       const groupKey = (scan.facility_name || '-').toLowerCase();
       if (groupKey !== currentGroup) {
         currentGroup = groupKey;
+        const collapsed = S.collapsedGroups.has(groupKey);
+        const chevron = collapsed ? '\u25B6' : '\u25BC';
         // Count facilities in this group
         const groupCount = displayScans.filter(s => (s.facility_name || '-').toLowerCase() === groupKey).length;
         const groupDomain = displayScans.find(s => (s.facility_name || '-').toLowerCase() === groupKey && s.domain)?.domain || '';
-        html += `<tr class="bg-gray-800/70 border-l-2 border-blue-500">
+        html += `<tr class="bg-gray-800/70 border-l-2 border-blue-500 cursor-pointer hover:bg-gray-700/70 transition" data-group="${escAttr(groupKey)}">
           <td colspan="11" class="px-3 py-2">
+            <span class="text-gray-500 text-xs mr-1">${chevron}</span>
             <span class="font-bold text-gray-200">${esc(scan.facility_name || '-')}</span>
             <span class="text-gray-500 text-xs ml-2">${groupCount} facilit${groupCount === 1 ? 'y' : 'ies'}</span>
             ${groupDomain ? `<span class="text-gray-600 text-xs ml-2">${esc(groupDomain)}</span>` : ''}
           </td>
         </tr>`;
       }
+      // Skip facility rows if group is collapsed
+      if (S.collapsedGroups.has(groupKey)) return;
     }
 
     const rowNum = S.offset + i + 1;
@@ -972,6 +978,16 @@ function renderTable() {
       const sel = window.getSelection();
       if (sel && sel.toString().length > 0) return;
       toggleRow(row.dataset.id);
+    });
+  });
+
+  // Group header collapse/expand handlers
+  tbody.querySelectorAll('tr[data-group]').forEach(row => {
+    row.addEventListener('click', () => {
+      const groupKey = row.dataset.group;
+      if (S.collapsedGroups.has(groupKey)) S.collapsedGroups.delete(groupKey);
+      else S.collapsedGroups.add(groupKey);
+      renderTable();
     });
   });
 
