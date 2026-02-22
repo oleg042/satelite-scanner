@@ -529,11 +529,14 @@ async def execute_bin_detection(
     else:
         scan.bin_detection_status = "completed"
 
-    # Save chunk images where bins were found
+    # Save chunk images where bins were found (only if confidence meets threshold)
     if bin_result.bin_present:
         final_img = Image.open(final_image_path)
         for cr in bin_result.chunk_results:
             if cr.get("status") == "success" and cr.get("bin_present"):
+                chunk_conf = cr.get("overall_confidence", 0)
+                if chunk_conf < min_confidence:
+                    continue
                 matching = [c for c in chunk_grid
                             if c["col"] == cr["col"] and c["row"] == cr["row"]]
                 if not matching:

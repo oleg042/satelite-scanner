@@ -1071,11 +1071,22 @@ function renderDetail(scan) {
         }
       }
 
-      // For bin_chunk screenshots, extract col/row from filename (e.g. bin_chunk_0_1)
+      // For bin_chunk screenshots, extract col/row and look up chunk result stats
       let typeLabel = ss.type;
+      let chunkInfo = null;
       if (ss.type === 'bin_chunk' && ss.filename) {
         const m = ss.filename.match(/bin_chunk_(\d+)_(\d+)/);
-        if (m) typeLabel = `bin_chunk c${m[1]}r${m[2]}`;
+        if (m) {
+          const col = parseInt(m[1]), row = parseInt(m[2]);
+          typeLabel = `Chunk c${col}r${row}`;
+          // Find chunk result from bin_detection step
+          if (trace && trace.steps) {
+            const binStep = trace.steps.find(s => s.step_name === 'bin_detection');
+            const chunkResults = binStep?.output_summary?.chunk_results || [];
+            const cr = chunkResults.find(c => c.col === col && c.row === row);
+            if (cr) chunkInfo = { bins: cr.total_bins || 0, confidence: cr.overall_confidence || 0 };
+          }
+        }
       }
       const label = `${typeLabel} (z${ss.zoom || '?'})${sizeStr}`;
       const overlayArg = overlayData ? JSON.stringify(overlayData).replace(/"/g, '&quot;').replace(/'/g, '&#39;') : 'null';
@@ -1104,9 +1115,12 @@ function renderDetail(scan) {
           <div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}${badges ? '<br>' + badges : ''}</div>
         </div>`;
       } else {
+        const chunkLabel = chunkInfo
+          ? `<div class="text-sm text-gray-300 mt-1">${esc(typeLabel)} — ${chunkInfo.bins} bin${chunkInfo.bins !== 1 ? 's' : ''}, ${chunkInfo.confidence}% conf</div>`
+          : `<div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}</div>`;
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null, null)" title="Click to enlarge">
             <img src="${thumbSrc}" alt="${esc(typeLabel)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-          <div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}</div>
+          ${chunkLabel}
         </div>`;
       }
     });
