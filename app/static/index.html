@@ -539,10 +539,20 @@
             <div>
               <label class="flex items-center gap-2 cursor-pointer mt-2">
                 <input id="set-bin-delete-final" type="checkbox"
-                  class="rounded bg-gray-800 border-gray-600 cursor-pointer">
+                  class="rounded bg-gray-800 border-gray-600 cursor-pointer"
+                  onchange="if(this.checked) document.getElementById('set-bin-resize-final').checked = false">
                 <span class="text-sm text-gray-300">Delete Final Image After Detection</span>
               </label>
               <p class="text-xs text-gray-600 mt-1">Remove the large final image from storage once bin detection completes. Chunk screenshots are kept.</p>
+            </div>
+            <div>
+              <label class="flex items-center gap-2 cursor-pointer mt-2">
+                <input id="set-bin-resize-final" type="checkbox"
+                  class="rounded bg-gray-800 border-gray-600 cursor-pointer"
+                  onchange="if(this.checked) document.getElementById('set-bin-delete-final').checked = false">
+                <span class="text-sm text-gray-300">Resize Final Image After Detection (50%)</span>
+              </label>
+              <p class="text-xs text-gray-600 mt-1">Shrink the final image to half its dimensions after bin detection. Keeps the image but cuts file size ~75%.</p>
             </div>
           </div>
           <div>
@@ -1689,6 +1699,7 @@ async function loadSettings() {
     document.getElementById('set-bin-max-chunk').value = s.bin_detection_max_chunk_m || '';
     document.getElementById('set-bin-min-confidence').value = s.bin_detection_min_confidence || '50';
     document.getElementById('set-bin-delete-final').checked = (s.bin_delete_final_image || 'false') === 'true';
+    document.getElementById('set-bin-resize-final').checked = (s.bin_resize_final_image || 'false') === 'true';
     document.getElementById('set-bin-detection-prompt').value = s.bin_detection_prompt || '';
     // Performance
     document.getElementById('set-tile-delay').value = s.tile_delay_s || '';
@@ -1754,6 +1765,7 @@ async function saveSettings(e) {
   const bmnc = document.getElementById('set-bin-min-confidence').value.trim();
   if (bmnc) body.bin_detection_min_confidence = bmnc;
   body.bin_delete_final_image = document.getElementById('set-bin-delete-final').checked ? 'true' : 'false';
+  body.bin_resize_final_image = document.getElementById('set-bin-resize-final').checked ? 'true' : 'false';
   const bdp = document.getElementById('set-bin-detection-prompt').value.trim();
   if (bdp) body.bin_detection_prompt = bdp;
   // Performance

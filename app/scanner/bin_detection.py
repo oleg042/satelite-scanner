@@ -437,6 +437,7 @@ async def execute_bin_detection(
     volume_path: str,
     clean_old: bool = True,
     delete_final_image: bool = False,
+    resize_final_image: bool = False,
 ) -> dict:
     """Full bin detection workflow: chunk, detect, save screenshots, record steps.
 
@@ -605,7 +606,7 @@ async def execute_bin_detection(
     )
     await db.commit()
 
-    # Optionally delete the final image to save storage
+    # Optionally delete or resize the final image to save storage
     if delete_final_image:
         try:
             os.unlink(final_image_path)
@@ -620,6 +621,33 @@ async def execute_bin_detection(
             )
         )
         await db.commit()
+    elif resize_final_image:
+        try:
+            img = Image.open(final_image_path)
+            new_w = img.width // 2
+            new_h = img.height // 2
+            resized = img.resize((new_w, new_h), Image.LANCZOS)
+            img.close()
+            resized.save(final_image_path)
+            resized.close()
+            # Update the screenshot DB record with new dimensions and file size
+            new_size = os.path.getsize(final_image_path)
+            result = await db.execute(
+                select(Screenshot).where(
+                    Screenshot.scan_id == scan.id,
+                    Screenshot.type == ScreenshotType.final,
+                )
+            )
+            ss = result.scalar_one_or_none()
+            if ss:
+                ss.width = new_w
+                ss.height = new_h
+                ss.file_size_bytes = new_size
+                await db.commit()
+            logger.info("Resized final image for scan %s to %dx%d (%dKB)",
+                        scan.id, new_w, new_h, new_size // 1024)
+        except Exception as e:
+            logger.warning("Failed to resize final image for scan %s: %s", scan.id, e)
 
     return {
         "scan_id": str(scan.id),

@@ -138,6 +138,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
     except (ValueError, TypeError):
         bin_detection_min_confidence = 50
     bin_delete_final_image = (await _get_setting(db, "bin_delete_final_image", "false")).lower() == "true"
+    bin_resize_final_image = (await _get_setting(db, "bin_resize_final_image", "false")).lower() == "true"
     return {
         "api_key": api_key,
         "validation_model": validation_model,
@@ -164,6 +165,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "bin_detection_max_chunk_m": bin_detection_max_chunk_m,
         "bin_detection_min_confidence": bin_detection_min_confidence,
         "bin_delete_final_image": bin_delete_final_image,
+        "bin_resize_final_image": bin_resize_final_image,
     }
 
 
@@ -1155,6 +1157,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     volume_path=settings.volume_path,
                     clean_old=False,
                     delete_final_image=config["bin_delete_final_image"],
+                    resize_final_image=config["bin_resize_final_image"],
                 )
                 step_num += 1  # execute_bin_detection records 2 steps (chunking + detection)
             except Exception as e:
