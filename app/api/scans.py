@@ -17,6 +17,7 @@ from app.schemas import (
     BulkImportRequest,
     ScanRequest,
     ScanResponse,
+    ScanStatsResponse,
     ScanStepResponse,
     ScanSubmitted,
     ScanTraceResponse,
@@ -187,6 +188,23 @@ async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     return _scan_to_response(scan)
 
 
+def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=None, search=None):
+    """Apply shared filter predicates to a scan query."""
+    if status:
+        q = q.where(Scan.status == status)
+    if exclude_status:
+        q = q.where(Scan.status != exclude_status)
+    if method:
+        q = q.where(Scan.method == method)
+    if bins == "true":
+        q = q.where(Scan.bin_present == True)
+    elif bins == "false":
+        q = q.where(Scan.bin_present == False)
+    if search:
+        q = q.where(Scan.facility_name.ilike(f"%{search}%") | Scan.facility_address.ilike(f"%{search}%"))
+    return q
+
+
 @router.get("/scans", response_model=list[ScanResponse])
 async def list_scans(
     status: str | None = Query(None),
@@ -200,24 +218,33 @@ async def list_scans(
 ):
     """List scans with optional filtering and facility name/address search."""
     q = select(Scan).order_by(Scan.started_at.desc().nullslast())
-
-    if status:
-        q = q.where(Scan.status == status)
-    if exclude_status:
-        q = q.where(Scan.status != exclude_status)
-    if method:
-        q = q.where(Scan.method == method)
-    if bins == "true":
-        q = q.where(Scan.bin_present == True)
-    elif bins == "false":
-        q = q.where(Scan.bin_present == False)
-    if search:
-        q = q.where(Scan.facility_name.ilike(f"%{search}%") | Scan.facility_address.ilike(f"%{search}%"))
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
 
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
     scans = result.scalars().all()
     return [_scan_to_response(scan) for scan in scans]
+
+
+@router.get("/scans/stats", response_model=ScanStatsResponse)
+async def scan_stats(
+    status: str | None = Query(None),
+    exclude_status: str | None = Query(None),
+    method: str | None = Query(None),
+    bins: str | None = Query(None),
+    search: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate stats across all matching scans (no pagination)."""
+    q = select(
+        func.count().label("total"),
+        func.count().filter(Scan.status == "completed").label("completed"),
+        func.count().filter(Scan.bin_present == True).label("bins_found"),
+    ).select_from(Scan)
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+
+    row = (await db.execute(q)).one()
+    return ScanStatsResponse(total=row.total, completed=row.completed, bins_found=row.bins_found)
 
 
 @router.delete("/scans", status_code=200)

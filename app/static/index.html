@@ -155,6 +155,8 @@
         <div><span class="text-gray-500">Facilities</span> <span id="stat-total" class="text-gray-300 font-medium">0</span> <span class="text-gray-600 mx-1">&middot;</span> <span class="text-gray-500">Completed</span> <span id="stat-completed" class="text-gray-300 font-medium">0</span></div>
         <div><span class="text-gray-500">Bins Found</span> <span id="stat-bins" class="text-green-400 font-medium">0</span></div>
       </div>
+    </div>
+    <div id="selection-toolbar" class="px-6 pb-3 flex items-center gap-3">
       <button id="scan-selected-btn" disabled
         class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
         Scan Selected (<span id="scan-selected-count">0</span>)
@@ -1036,13 +1038,6 @@ function renderTable() {
     selectAll.indeterminate = sorted.some(s => S.selected.has(s.id)) && !selectAll.checked;
   }
 
-  // Update stats
-  const completedCount = sorted.filter(s => s.status === 'completed').length;
-  const binsFoundCount = sorted.filter(s => s.bin_present === true).length;
-  document.getElementById('stat-total').textContent = sorted.length;
-  document.getElementById('stat-completed').textContent = completedCount;
-  document.getElementById('stat-bins').textContent = binsFoundCount;
-
   document.getElementById('prev-btn').disabled = S.offset === 0;
   document.getElementById('next-btn').disabled = sorted.length < S.limit;
   const page = Math.floor(S.offset / S.limit) + 1;
@@ -1773,9 +1768,26 @@ async function fetchScans() {
       newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status || s.bin_count !== oldScans[i]?.bin_count);
     if (changed) renderTable();
     managePoll();
+    fetchStats();
   } catch (e) {
     toast('Failed to load scans: ' + e.message, 'error');
   }
+}
+
+async function fetchStats() {
+  const params = new URLSearchParams();
+  const status = document.getElementById('filter-status').value;
+  const bins = document.getElementById('filter-bins').value;
+  const search = document.getElementById('search-input').value.trim();
+  if (status) params.set('status', status);
+  if (bins) params.set('bins', bins);
+  if (search) params.set('search', search);
+  try {
+    const s = await api('GET', `/api/scans/stats?${params}`);
+    document.getElementById('stat-total').textContent = s.total;
+    document.getElementById('stat-completed').textContent = s.completed;
+    document.getElementById('stat-bins').textContent = s.bins_found;
+  } catch {}
 }
 
 // --- Polling ---

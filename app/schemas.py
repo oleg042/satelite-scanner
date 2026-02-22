@@ -133,6 +133,12 @@ class ScanResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScanStatsResponse(BaseModel):
+    total: int = 0
+    completed: int = 0
+    bins_found: int = 0
+
+
 class ScanSubmitted(BaseModel):
     scan_id: UUID
     status: str = "queued"
