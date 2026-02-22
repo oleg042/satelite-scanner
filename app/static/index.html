@@ -130,10 +130,15 @@
         <option value="true">Bins Found</option>
         <option value="false">No Bins</option>
       </select>
-      <button id="group-toggle-btn" title="Toggle company grouping"
-        class="bg-gray-800 border-2 border-blue-500 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
-        Grouped
-      </button>
+      <label class="inline-flex items-center gap-2 cursor-pointer select-none" title="Toggle company grouping">
+        <span id="group-label-flat" class="text-sm text-blue-400 font-medium">Flat</span>
+        <div class="relative">
+          <input type="checkbox" id="group-toggle" class="sr-only peer">
+          <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition"></div>
+          <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-4 transition"></div>
+        </div>
+        <span id="group-label-grouped" class="text-sm text-gray-500">Grouped</span>
+      </label>
       <button id="import-btn" title="Bulk import facilities"
         class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
         Import
@@ -646,7 +651,7 @@ const S = {
   // Geocoding resolved state
   resolved: null, // { lat, lng, display_name, source }
   settings: {},
-  groupByCompany: true,
+  groupByCompany: false,
   collapsedGroups: new Set(),
   _detectingIds: new Set(),
 };
@@ -907,12 +912,18 @@ function renderTable() {
         const collapsed = S.collapsedGroups.has(groupKey);
         const chevron = collapsed ? '\u25B6' : '\u25BC';
         // Count facilities in this group
-        const groupCount = displayScans.filter(s => (s.facility_name || '-').toLowerCase() === groupKey).length;
-        const groupDomain = displayScans.find(s => (s.facility_name || '-').toLowerCase() === groupKey && s.domain)?.domain || '';
+        const groupScans = displayScans.filter(s => (s.facility_name || '-').toLowerCase() === groupKey);
+        const groupCount = groupScans.length;
+        const groupDomain = groupScans.find(s => s.domain)?.domain || '';
+        const anyBins = groupScans.some(s => s.bin_present === true);
+        const allPending = groupScans.every(s => !s.bin_present && s.status !== 'completed');
+        const binIcon = allPending ? '' : anyBins
+          ? '<span class="text-green-400 ml-2" title="Bins found">&#10003;</span>'
+          : '<span class="text-red-400 ml-2" title="No bins found">&#10007;</span>';
         html += `<tr class="bg-gray-800/70 border-l-2 border-blue-500 cursor-pointer hover:bg-gray-700/70 transition" data-group="${escAttr(groupKey)}">
           <td colspan="11" class="px-3 py-2">
             <span class="text-gray-500 text-xs mr-1">${chevron}</span>
-            <span class="font-bold text-gray-200">${esc(scan.facility_name || '-')}</span>
+            <span class="font-bold text-gray-200">${esc(scan.facility_name || '-')}</span>${binIcon}
             <span class="text-gray-500 text-xs ml-2">${groupCount} facilit${groupCount === 1 ? 'y' : 'ies'}</span>
             ${groupDomain ? `<span class="text-gray-600 text-xs ml-2">${esc(groupDomain)}</span>` : ''}
           </td>
@@ -2389,13 +2400,18 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
   document.getElementById('filter-bins').addEventListener('change', () => { S.offset = 0; fetchScans(); });
 
-  // Group-by-company toggle
-  document.getElementById('group-toggle-btn').addEventListener('click', () => {
-    S.groupByCompany = !S.groupByCompany;
-    const btn = document.getElementById('group-toggle-btn');
-    btn.textContent = S.groupByCompany ? 'Grouped' : 'Flat';
-    btn.classList.toggle('border-blue-500', S.groupByCompany);
-    btn.classList.toggle('border-gray-700', !S.groupByCompany);
+  // Group-by-company toggle (switch)
+  document.getElementById('group-toggle').addEventListener('change', (e) => {
+    S.groupByCompany = e.target.checked;
+    document.getElementById('group-label-flat').classList.toggle('text-blue-400', !S.groupByCompany);
+    document.getElementById('group-label-flat').classList.toggle('text-gray-500', S.groupByCompany);
+    document.getElementById('group-label-grouped').classList.toggle('text-blue-400', S.groupByCompany);
+    document.getElementById('group-label-grouped').classList.toggle('text-gray-500', !S.groupByCompany);
+    if (S.groupByCompany) {
+      // Collapse all groups by default when switching to grouped
+      const allGroups = new Set(S.scans.map(s => (s.facility_name || '-').toLowerCase()));
+      S.collapsedGroups = allGroups;
+    }
     renderTable();
   });
 
