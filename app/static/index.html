@@ -2445,16 +2445,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Drag-and-drop for CSV upload
   const dropZone = document.getElementById('csv-drop-zone');
-  dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('border-blue-500', 'bg-blue-900/20');
-  });
-  dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('border-blue-500', 'bg-blue-900/20');
-  });
+  function dropHighlight(on) {
+    dropZone.classList.toggle('border-gray-700', !on);
+    dropZone.classList.toggle('bg-gray-800/50', !on);
+    dropZone.classList.toggle('border-blue-500', on);
+    dropZone.classList.toggle('bg-blue-900/30', on);
+  }
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropHighlight(true); });
+  dropZone.addEventListener('dragleave', () => dropHighlight(false));
   dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
-    dropZone.classList.remove('border-blue-500', 'bg-blue-900/20');
+    dropHighlight(false);
     const file = e.dataTransfer.files[0];
     if (file && (file.name.endsWith('.csv') || file.type === 'text/csv')) {
       loadCsvFile(file);
