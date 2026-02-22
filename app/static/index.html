@@ -112,63 +112,65 @@
     </div>
 
     <!-- Toolbar -->
-    <div class="px-6 py-3 flex flex-wrap items-center gap-3 border-b border-gray-800/50">
-      <input id="search-input" type="text" placeholder="Search name or address..."
-        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
-      <select id="filter-status"
-        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-        <option value="">All Statuses</option>
-        <option value="pending">Pending</option>
-        <option value="queued">Queued</option>
-        <option value="failed">Failed</option>
-        <option value="skipped">Skipped</option>
-        <option value="completed">Completed</option>
-      </select>
-      <select id="filter-bins"
-        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
-        <option value="">All Bins</option>
-        <option value="true">Bins Found</option>
-        <option value="false">No Bins</option>
-      </select>
-      <label class="inline-flex items-center gap-2 cursor-pointer select-none" title="Toggle company grouping">
-        <span id="group-label-flat" class="text-sm text-blue-400 font-medium">Flat</span>
-        <div class="relative">
-          <input type="checkbox" id="group-toggle" class="sr-only peer">
-          <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition"></div>
-          <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-4 transition"></div>
+    <div class="border-b border-gray-800/50">
+      <div class="px-6 py-3 flex flex-wrap items-center gap-3">
+        <input id="search-input" type="text" placeholder="Search name or address..."
+          class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-56 focus:ring-1 focus:ring-blue-500 outline-none">
+        <select id="filter-status"
+          class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          <option value="">All Statuses</option>
+          <option value="pending">Pending</option>
+          <option value="queued">Queued</option>
+          <option value="failed">Failed</option>
+          <option value="skipped">Skipped</option>
+          <option value="completed">Completed</option>
+        </select>
+        <select id="filter-bins"
+          class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          <option value="">All Bins</option>
+          <option value="true">Bins Found</option>
+          <option value="false">No Bins</option>
+        </select>
+        <label class="inline-flex items-center gap-2 cursor-pointer select-none" title="Toggle company grouping">
+          <span id="group-label-flat" class="text-sm text-blue-400 font-medium">Flat</span>
+          <div class="relative">
+            <input type="checkbox" id="group-toggle" class="sr-only peer">
+            <div class="w-9 h-5 bg-gray-700 rounded-full peer peer-checked:bg-blue-600 transition"></div>
+            <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow peer-checked:translate-x-4 transition"></div>
+          </div>
+          <span id="group-label-grouped" class="text-sm text-gray-500">Grouped</span>
+        </label>
+        <button id="import-btn" title="Bulk import facilities"
+          class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
+          Import
+        </button>
+        <button id="refresh-btn" title="Refresh"
+          class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
+          &#8635; Refresh
+        </button>
+        <button id="scan-pending-btn"
+          class="bg-green-700 hover:bg-green-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">
+          Scan All Pending
+        </button>
+        <div id="scan-stats" class="ml-auto text-right text-sm leading-snug">
+          <div><span class="text-gray-500">Facilities</span> <span id="stat-total" class="text-gray-300 font-medium">0</span> <span class="text-gray-600 mx-1">&middot;</span> <span class="text-gray-500">Completed</span> <span id="stat-completed" class="text-gray-300 font-medium">0</span></div>
+          <div><span class="text-gray-500">Bins Found</span> <span id="stat-bins" class="text-green-400 font-medium">0</span></div>
         </div>
-        <span id="group-label-grouped" class="text-sm text-gray-500">Grouped</span>
-      </label>
-      <button id="import-btn" title="Bulk import facilities"
-        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
-        Import
-      </button>
-      <button id="refresh-btn" title="Refresh"
-        class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
-        &#8635; Refresh
-      </button>
-      <button id="scan-pending-btn"
-        class="bg-green-700 hover:bg-green-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">
-        Scan All Pending
-      </button>
-      <div id="scan-stats" class="ml-auto text-right text-sm leading-snug">
-        <div><span class="text-gray-500">Facilities</span> <span id="stat-total" class="text-gray-300 font-medium">0</span> <span class="text-gray-600 mx-1">&middot;</span> <span class="text-gray-500">Completed</span> <span id="stat-completed" class="text-gray-300 font-medium">0</span></div>
-        <div><span class="text-gray-500">Bins Found</span> <span id="stat-bins" class="text-green-400 font-medium">0</span></div>
       </div>
-    </div>
-    <div id="selection-toolbar" class="px-6 pb-3 flex items-center gap-3">
-      <button id="scan-selected-btn" disabled
-        class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
-        Scan Selected (<span id="scan-selected-count">0</span>)
-      </button>
-      <button id="detect-bins-btn" disabled
-        class="bg-purple-700 hover:bg-purple-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
-        Detect Bins (<span id="detect-bins-count">0</span>)
-      </button>
-      <button id="delete-btn" disabled
-        class="bg-red-700 hover:bg-red-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition hidden">
-        Delete Selected (<span id="delete-count">0</span>)
-      </button>
+      <div id="selection-toolbar" class="px-6 pb-3 flex items-center gap-3 hidden">
+        <button id="scan-selected-btn" disabled
+          class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition">
+          Scan Selected (<span id="scan-selected-count">0</span>)
+        </button>
+        <button id="detect-bins-btn" disabled
+          class="bg-purple-700 hover:bg-purple-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition">
+          Detect Bins (<span id="detect-bins-count">0</span>)
+        </button>
+        <button id="delete-btn" disabled
+          class="bg-red-700 hover:bg-red-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition">
+          Delete Selected (<span id="delete-count">0</span>)
+        </button>
+      </div>
     </div>
 
     <!-- Table (scrollable) -->
@@ -1585,13 +1587,14 @@ async function toggleRow(scanId) {
 function updateSelectionBtns() {
   const count = S.selected.size;
 
+  document.getElementById('selection-toolbar').classList.toggle('hidden', count === 0);
+
   const delBtn = document.getElementById('delete-btn');
   if (!document.getElementById('delete-count')) {
     delBtn.innerHTML = 'Delete Selected (<span id="delete-count">0</span>)';
   }
   document.getElementById('delete-count').textContent = count;
   delBtn.disabled = count === 0;
-  delBtn.classList.toggle('hidden', count === 0);
 
   const scanBtn = document.getElementById('scan-selected-btn');
   if (!document.getElementById('scan-selected-count')) {
@@ -1599,7 +1602,6 @@ function updateSelectionBtns() {
   }
   document.getElementById('scan-selected-count').textContent = count;
   scanBtn.disabled = count === 0;
-  scanBtn.classList.toggle('hidden', count === 0);
 
   const binBtn = document.getElementById('detect-bins-btn');
   if (!document.getElementById('detect-bins-count')) {
@@ -1607,7 +1609,6 @@ function updateSelectionBtns() {
   }
   document.getElementById('detect-bins-count').textContent = count;
   binBtn.disabled = count === 0;
-  binBtn.classList.toggle('hidden', count === 0);
 }
 
 async function deleteSelected() {
