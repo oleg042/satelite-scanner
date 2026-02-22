@@ -135,7 +135,7 @@ async def detect_bins_in_chunk(
 
     if not include_reasoning:
         import re as _re
-        prompt = _re.sub(r',?\s*"reasoning"\s*:\s*"[^"]*"', '', prompt)
+        prompt = _re.sub(r',?\s*"evidence"\s*:\s*"[^"]*"', '', prompt)
 
     max_retries = 3
     last_error = None
@@ -147,7 +147,8 @@ async def detect_bins_in_chunk(
                 chunk_image_b64, prompt, api_key, model,
             )
             if not include_reasoning:
-                result["parsed"].pop("reasoning", None)
+                for bin_item in result["parsed"].get("bins", []):
+                    bin_item.pop("evidence", None)
             logger.info("Chunk %s: bin_present=%s, bins=%d",
                         chunk_label, result["parsed"].get("bin_present"),
                         result["parsed"].get("total_bins", 0))
@@ -373,20 +374,7 @@ async def run_bin_detection(
 
                 confidences.append(bin_conf)
 
-                # Convert chunk-relative bbox to full-image-relative
-                bbox_rel = bin_item.get("bbox_relative", {})
-                full_x = (chunk["px_x"] + bbox_rel.get("x", 0) * chunk["px_w"]) / img_w
-                full_y = (chunk["px_y"] + bbox_rel.get("y", 0) * chunk["px_h"]) / img_h
-                full_w = (bbox_rel.get("w", 0) * chunk["px_w"]) / img_w
-                full_h = (bbox_rel.get("h", 0) * chunk["px_h"]) / img_h
-
                 converted_bin = {**bin_item}
-                converted_bin["bbox_relative"] = {
-                    "x": round(full_x, 6),
-                    "y": round(full_y, 6),
-                    "w": round(full_w, 6),
-                    "h": round(full_h, 6),
-                }
                 converted_bin["source_chunk"] = {"col": chunk["col"], "row": chunk["row"]}
                 all_bins.append(converted_bin)
 
@@ -398,7 +386,7 @@ async def run_bin_detection(
                 total_bins += 1
 
         # Collect reasoning
-        reasoning = parsed.get("reasoning", "") if include_reasoning else ""
+        reasoning = parsed.get("reasoning", "")
         if isinstance(reasoning, list):
             reasoning = " ".join(r for r in reasoning if r and r.strip())
         if isinstance(reasoning, str) and reasoning.strip():
