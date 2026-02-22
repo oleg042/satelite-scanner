@@ -1315,7 +1315,7 @@ function renderDetail(scan) {
 
         // Successful chunk
         const crBins = cr.bins || [];
-        const crNotes = cr.notes || [];
+        const crReasoning = cr.reasoning || '';
         const crTokens = cr.total_tokens || 0;
         const crConfs = crBins.map(b => b.confidence || 0);
         const crAvgConf = crConfs.length ? Math.round(crConfs.reduce((a, b) => a + b, 0) / crConfs.length) : 0;
@@ -1358,12 +1358,13 @@ function renderDetail(scan) {
           });
         }
 
-        // Analysis / notes
-        const notesStr = Array.isArray(crNotes) ? crNotes.join(' ') : (typeof crNotes === 'string' ? crNotes : '');
-        if (notesStr.trim()) {
+        // Reasoning paragraph
+        const reasoning = cr.reasoning || '';
+        const reasoningStr = Array.isArray(reasoning) ? reasoning.join(' ') : (typeof reasoning === 'string' ? reasoning : '');
+        if (reasoningStr.trim()) {
           html += `<div class="border-t border-gray-800 pt-1 mt-1">`;
-          html += `<div class="text-gray-500 font-medium">Analysis:</div>`;
-          html += `<div class="ml-2 text-gray-400">${esc(notesStr)}</div>`;
+          html += `<div class="text-gray-500 font-medium">Reasoning:</div>`;
+          html += `<div class="ml-2 text-gray-400">${esc(reasoningStr)}</div>`;
           html += `</div>`;
         }
 
@@ -1381,28 +1382,42 @@ function renderDetail(scan) {
         html += `</div></details>`;
       });
 
-      // Aggregated notes across all chunks
-      const allNotes = binOut.notes || [];
-      const allNotesArr = Array.isArray(allNotes) ? allNotes : (typeof allNotes === 'string' && allNotes.trim() ? [allNotes] : []);
-      // Build set of chunk labels that found bins for green highlighting
-      const chunksWithBinsSet = new Set();
-      chunkResults.forEach(cr => {
-        if (cr.status === 'success' && cr.bin_present && (cr.total_bins || 0) > 0) {
-          chunksWithBinsSet.add(`c${cr.col}r${cr.row}`);
-        }
-      });
-      if (allNotesArr.length > 0) {
+      // Per-chunk reasoning summary
+      if (chunkResults.length > 0) {
         html += `<div class="bg-gray-900 rounded px-3 py-2 text-sm">`;
-        html += `<div class="text-gray-500 font-medium text-xs mb-2">All Notes:</div>`;
-        allNotesArr.forEach(n => {
-          const noteStr = typeof n === 'string' ? n : JSON.stringify(n);
-          // Check if this note's chunk found bins (extract [cXrY] prefix)
-          const chunkMatch = noteStr.match(/^\[c(\d+)r(\d+)\]/);
-          const chunkLabel = chunkMatch ? `c${chunkMatch[1]}r${chunkMatch[2]}` : null;
-          const hasBins = chunkLabel && chunksWithBinsSet.has(chunkLabel);
-          const noteColor = hasBins ? 'text-green-400' : 'text-gray-400';
-          const icon = hasBins ? '&#10003; ' : '';
-          html += `<div class="${noteColor} text-xs ml-2 mb-2">${icon}${esc(noteStr)}</div>`;
+        html += `<div class="text-gray-500 font-medium text-xs mb-2">Per-Chunk Reasoning:</div>`;
+        chunkResults.forEach(cr => {
+          if (cr.status === 'failed') return;
+          const label = `c${cr.col}r${cr.row}`;
+          const hasBins = cr.bin_present && (cr.total_bins || 0) > 0;
+          const crBins = cr.bins || [];
+          const crConfs = crBins.map(b => b.confidence || 0);
+          const crAvgConf = crConfs.length ? Math.round(crConfs.reduce((a, b) => a + b, 0) / crConfs.length) : 0;
+          const crFilled = cr.filled_or_partial_count || 0;
+          const crEmpty = cr.empty_or_unclear_count || 0;
+          const reasoning = cr.reasoning || '';
+          const reasoningStr = Array.isArray(reasoning) ? reasoning.join(' ') : (typeof reasoning === 'string' ? reasoning : '');
+
+          const borderColor = hasBins ? 'border-green-600' : 'border-gray-800';
+          const bgColor = hasBins ? 'bg-gray-800/50' : '';
+          html += `<div class="border-l-2 ${borderColor} ${bgColor} pl-3 ml-1 mb-3 py-1">`;
+          // Header line: chunk label + stats
+          html += `<div class="flex items-center gap-3 flex-wrap mb-1">`;
+          html += `<span class="font-medium ${hasBins ? 'text-green-400' : 'text-gray-300'}">${esc(label)}</span>`;
+          if (hasBins) {
+            html += `<span class="text-gray-300">${cr.total_bins} bin${cr.total_bins !== 1 ? 's' : ''}</span>`;
+            html += `<span class="text-yellow-400">${crFilled} filled</span>`;
+            html += `<span class="text-gray-500">${crEmpty} empty</span>`;
+            html += `<span class="text-gray-300">conf ${crAvgConf}%</span>`;
+          } else {
+            html += `<span class="text-gray-500">0 bins</span>`;
+          }
+          html += `</div>`;
+          // Reasoning paragraph
+          if (reasoningStr.trim()) {
+            html += `<div class="text-xs text-gray-400">${esc(reasoningStr)}</div>`;
+          }
+          html += `</div>`;
         });
         html += `</div>`;
       }

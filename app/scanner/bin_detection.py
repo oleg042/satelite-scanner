@@ -334,7 +334,7 @@ async def run_bin_detection(
             "empty_or_unclear_count": parsed.get("empty_or_unclear_count", 0),
             "overall_confidence": chunk_confidence,
             "bins": chunk_bins,
-            "notes": parsed.get("notes", []),
+            "reasoning": parsed.get("reasoning", ""),
             "raw_response": result.get("raw_response", ""),
             "prompt_tokens": result.get("prompt_tokens", 0),
             "completion_tokens": result.get("completion_tokens", 0),
@@ -377,14 +377,12 @@ async def run_bin_detection(
 
                 total_bins += 1
 
-        # Collect notes
-        notes = parsed.get("notes", [])
-        if isinstance(notes, list):
-            for note in notes:
-                if note and note.strip():
-                    all_notes.append(f"[c{chunk['col']}r{chunk['row']}] {note}")
-        elif isinstance(notes, str) and notes.strip():
-            all_notes.append(f"[c{chunk['col']}r{chunk['row']}] {notes}")
+        # Collect reasoning
+        reasoning = parsed.get("reasoning", "")
+        if isinstance(reasoning, list):
+            reasoning = " ".join(r for r in reasoning if r and r.strip())
+        if isinstance(reasoning, str) and reasoning.strip():
+            all_notes.append(f"[c{chunk['col']}r{chunk['row']}] {reasoning}")
 
     # Overall confidence: average of per-bin confidences across all chunks
     if confidences:
