@@ -623,6 +623,7 @@ const S = {
   currentPage: 'scans',
   // Geocoding resolved state
   resolved: null, // { lat, lng, display_name, source }
+  settings: {},
 };
 
 // --- Router ---
@@ -1284,7 +1285,7 @@ function renderDetail(scan) {
       const chunkResults = binOut.chunk_results || [];
       const totalBins = binOut.total_bins || 0;
       const binTokensTotal = binStep ? (binStep.ai_tokens_total || 0) : 0;
-      const minConfidence = binIn.min_confidence || 50;
+      const minConfidence = parseInt(S.settings.bin_detection_min_confidence) || binIn.min_confidence || 50;
       const binDur = binStep && binStep.duration_ms != null ? (binStep.duration_ms / 1000).toFixed(1) : '?';
       const binModel = binStep ? (binStep.ai_model || '?') : '?';
       const bds = scan.bin_detection_status;
@@ -1665,6 +1666,7 @@ async function fetchHealth() {
 async function loadSettings() {
   try {
     const s = await api('GET', '/api/settings');
+    S.settings = s;
     document.getElementById('set-api-key').value = '';
     document.getElementById('set-api-key-mask').textContent = s.openai_api_key || 'not set';
     document.getElementById('set-serper-key').value = '';
@@ -2323,6 +2325,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Health polling
   fetchHealth();
   setInterval(fetchHealth, 30000);
+
+  // Eagerly load settings so rendering has access to current thresholds
+  loadSettings();
 });
 </script>
 </body>
