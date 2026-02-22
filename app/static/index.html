@@ -1349,17 +1349,16 @@ function renderDetail(scan) {
           return;
         }
 
-        // Successful chunk
+        // Successful chunk — use overall_confidence (min of per-bin confs, same as backend save gate)
         const crBins = cr.bins || [];
         const crReasoning = cr.reasoning || '';
         const crTokens = cr.total_tokens || 0;
-        const crConfs = crBins.map(b => b.confidence || 0);
-        const crAvgConf = crConfs.length ? Math.round(crConfs.reduce((a, b) => a + b, 0) / crConfs.length) : 0;
+        const crConf = cr.overall_confidence || 0;
         const binCountStr = cr.total_bins || 0;
         const crFilled = cr.filled_or_partial_count || 0;
         const crEmpty = cr.empty_or_unclear_count || 0;
         const hasBins = binCountStr > 0;
-        const passesGate = hasBins && crAvgConf >= minConfidence;
+        const passesGate = hasBins && crConf >= minConfidence;
 
         html += `<details class="text-xs">`;
         html += `<summary class="cursor-pointer hover:text-gray-300 text-gray-400 bg-gray-900 rounded px-3 py-1">`;
@@ -1368,7 +1367,7 @@ function renderDetail(scan) {
           html += `<span class="text-gray-300">${binCountStr} bin${binCountStr !== 1 ? 's' : ''}</span>`;
           html += ` <span class="text-yellow-400">${crFilled}F</span>`;
           html += ` <span class="text-gray-500">${crEmpty}E</span>`;
-          html += ` <span class="${passesGate ? 'text-gray-300' : 'text-yellow-600'}">conf ${crAvgConf}%</span>`;
+          html += ` <span class="${passesGate ? 'text-gray-300' : 'text-yellow-600'}">conf ${crConf}%</span>`;
           if (!passesGate) html += ` <span class="text-yellow-700">(below ${minConfidence}%)</span>`;
         } else {
           html += `<span class="text-gray-500">0 bins</span>`;
