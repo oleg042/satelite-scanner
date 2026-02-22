@@ -508,6 +508,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
             "chunks_with_bins": bin_result.chunks_with_bins,
             "chunks_failed": bin_result.chunks_failed,
             "notes": bin_result.notes,
+            "chunk_results": bin_result.chunk_results,
         }),
         decision=bin_decision,
         ai_model=model,
