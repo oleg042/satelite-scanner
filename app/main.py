@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import tarfile
 from contextlib import asynccontextmanager
 
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from sqlalchemy import text
 
 from app.api.router import api_router, health_router, init_browser_semaphore, shutdown_browser
@@ -158,12 +160,54 @@ async def _init_db():
     logger.info("Default settings seeded")
 
 
+async def _maybe_migrate_volume():
+    """One-time volume migration: download + extract tar.gz if MIGRATION_DATA_URL is set.
+
+    Temporary — remove after migration is complete.
+    """
+    url = os.environ.get("MIGRATION_DATA_URL", "").strip()
+    if not url:
+        return
+
+    screenshots_dir = os.path.join(settings.volume_path, "screenshots")
+    # Only run if screenshots dir is empty (first boot on new project)
+    if os.path.isdir(screenshots_dir) and os.listdir(screenshots_dir):
+        logger.info("Volume migration: /data/screenshots already has data, skipping")
+        return
+
+    logger.info("Volume migration: downloading from %s ...", url)
+    tmp_path = os.path.join(settings.volume_path, "_migration.tar.gz")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+            async with client.stream("GET", url, follow_redirects=True) as resp:
+                resp.raise_for_status()
+                total = 0
+                with open(tmp_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                        total += len(chunk)
+                logger.info("Volume migration: downloaded %.1f MB", total / (1024 * 1024))
+
+        logger.info("Volume migration: extracting to %s ...", settings.volume_path)
+        with tarfile.open(tmp_path, "r:gz") as tar:
+            tar.extractall(path=settings.volume_path)
+        logger.info("Volume migration: complete!")
+    except Exception as e:
+        logger.error("Volume migration failed: %s", e)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init DB, ensure volume dir, start worker. Shutdown: cancel worker."""
     # Ensure volume directory exists
     os.makedirs(settings.volume_path, exist_ok=True)
     os.makedirs(os.path.join(settings.volume_path, "screenshots"), exist_ok=True)
+
+    # One-time volume migration (temporary — remove after migration)
+    await _maybe_migrate_volume()
 
     await _init_db()
 

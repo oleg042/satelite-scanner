@@ -1,15 +1,17 @@
 """API router — aggregates all endpoint modules."""
 
 import asyncio
+import io
 import logging
 import os
 import re
 import shutil
+import tarfile
 import urllib.parse
 
 import httpx
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -263,6 +265,48 @@ async def cleanup_storage():
             "screenshot_files": orphan_deleted,
         },
     }
+
+
+# --- Volume export (temporary — remove after migration) ---
+
+@api_router.get("/admin/export-volume")
+async def export_volume():
+    """Stream the entire volume directory as a tar.gz archive.
+
+    Temporary endpoint for migrating volume data to a new Railway project.
+    Remove after migration is complete.
+    """
+    volume = app_settings.volume_path
+    if not os.path.isdir(volume):
+        return JSONResponse({"error": "Volume path does not exist"}, status_code=404)
+
+    def _tar_generator():
+        """Yield tar.gz chunks without buffering the whole archive in memory."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for root, dirs, files in os.walk(volume):
+                for fname in files:
+                    full_path = os.path.join(root, fname)
+                    arcname = os.path.relpath(full_path, volume)
+                    tar.add(full_path, arcname=arcname)
+                    # Flush what we have so far
+                    buf.seek(0)
+                    data = buf.read()
+                    if data:
+                        yield data
+                    buf.seek(0)
+                    buf.truncate()
+        # Final flush after tar close (writes end-of-archive markers)
+        buf.seek(0)
+        data = buf.read()
+        if data:
+            yield data
+
+    return StreamingResponse(
+        _tar_generator(),
+        media_type="application/gzip",
+        headers={"Content-Disposition": "attachment; filename=volume.tar.gz"},
+    )
 
 
 # --- Railway restart ---
