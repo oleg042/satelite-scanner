@@ -217,7 +217,7 @@ async def list_scans(
     db: AsyncSession = Depends(get_db),
 ):
     """List scans with optional filtering and facility name/address search."""
-    q = select(Scan).order_by(Scan.started_at.desc().nullslast())
+    q = select(Scan).order_by(Scan.id.desc())
     q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
 
     q = q.offset(offset).limit(limit)
