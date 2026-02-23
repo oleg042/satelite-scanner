@@ -56,6 +56,7 @@ class SettingsUpdate(BaseModel):
     bin_detection_model: Optional[str] = None
     bin_detection_max_chunk_m: Optional[str] = None
     bin_detection_min_confidence: Optional[str] = None
+    bin_detection_tentative_confidence: Optional[str] = None
     bin_delete_final_image: Optional[str] = None
     bin_resize_final_image: Optional[str] = None
     bin_detection_reasoning: Optional[str] = None
@@ -123,6 +124,9 @@ class ScanResponse(BaseModel):
     bin_empty_count: Optional[int] = None
     bin_confidence: Optional[int] = None
     bin_detection_status: Optional[str] = None
+    bin_tentative_count: Optional[int] = None
+    bin_tentative_filled_count: Optional[int] = None
+    bin_tentative_empty_count: Optional[int] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
     started_at: Optional[datetime] = None
@@ -167,6 +171,7 @@ class SettingsResponse(BaseModel):
     bin_detection_model: str = ""
     bin_detection_max_chunk_m: str = ""
     bin_detection_min_confidence: str = ""
+    bin_detection_tentative_confidence: str = ""
     bin_delete_final_image: str = ""
     bin_resize_final_image: str = ""
     bin_detection_reasoning: str = ""

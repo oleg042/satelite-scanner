@@ -78,6 +78,9 @@ def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
         bin_empty_count=scan.bin_empty_count,
         bin_confidence=scan.bin_confidence,
         bin_detection_status=scan.bin_detection_status,
+        bin_tentative_count=scan.bin_tentative_count,
+        bin_tentative_filled_count=scan.bin_tentative_filled_count,
+        bin_tentative_empty_count=scan.bin_tentative_empty_count,
         error_message=scan.error_message,
         skip_reason=scan.skip_reason,
         started_at=scan.started_at,
@@ -400,6 +403,12 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         min_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_min_confidence", "50"))))
     except (ValueError, TypeError):
         min_confidence = 50
+    try:
+        tentative_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_tentative_confidence", "60"))))
+    except (ValueError, TypeError):
+        tentative_confidence = 60
+    if tentative_confidence >= min_confidence:
+        tentative_confidence = max(0, min_confidence - 10)
     delete_final = (await _get_setting(db, "bin_delete_final_image", "false")).lower() == "true"
     resize_final = (await _get_setting(db, "bin_resize_final_image", "false")).lower() == "true"
     include_reasoning = (await _get_setting(db, "bin_detection_reasoning", "true")).lower() == "true"
@@ -423,6 +432,7 @@ async def _run_bin_detection_for_scan(scan: Scan, db: AsyncSession) -> dict:
         delete_final_image=delete_final,
         resize_final_image=resize_final,
         include_reasoning=include_reasoning,
+        tentative_confidence=tentative_confidence,
     )
 
 

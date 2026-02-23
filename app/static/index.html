@@ -595,6 +595,12 @@
               <p class="text-xs text-gray-600 mt-1">Bins below this confidence are excluded from counts (0-100)</p>
             </div>
             <div>
+              <label class="block text-sm text-gray-300 mb-1.5">Tentative Bin Confidence (%)</label>
+              <input id="set-bin-tentative-confidence" type="number" min="0" max="100"
+                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+              <p class="text-xs text-gray-600 mt-1">Bins between this and min confidence shown as tentative (yellow). Must be lower than min confidence.</p>
+            </div>
+            <div>
               <label class="flex items-center gap-2 cursor-pointer mt-2">
                 <input id="set-bin-delete-final" type="checkbox"
                   class="rounded bg-gray-800 border-gray-600 cursor-pointer"
@@ -873,17 +879,31 @@ function fmtBbox(scan) {
 }
 
 function fmtBins(scan) {
-  if (scan.bin_present === true) return '<span class="text-green-400 font-bold">&#10003;</span>';
+  const confirmed = (scan.bin_count || 0) > 0;
+  const tentative = (scan.bin_tentative_count || 0) > 0;
+  if (confirmed) return '<span class="text-green-400 font-bold">&#10003;</span>';
+  if (tentative) return '<span class="text-yellow-400 font-bold">&#10003;</span>';
   if (scan.bin_present === false) return '<span class="text-gray-500">&#10007;</span>';
   return '<span class="text-gray-600">-</span>';
 }
 
 function fmtBinQty(scan) {
-  if (scan.bin_count == null) return '-';
-  if (scan.bin_count === 0) return '0';
-  const f = scan.bin_filled_count || 0;
-  const e = scan.bin_empty_count || 0;
-  return `${scan.bin_count} <span class="text-gray-500">(${f}F/${e}E)</span>`;
+  const c = scan.bin_count || 0;
+  const t = scan.bin_tentative_count || 0;
+  if (scan.bin_count == null && t === 0) return '-';
+  if (c === 0 && t === 0) return '0';
+  let rows = [];
+  if (c > 0) {
+    const f = scan.bin_filled_count || 0;
+    const e = scan.bin_empty_count || 0;
+    rows.push(`<div><span class="text-green-400">${c}</span> <span class="text-gray-500">(${f}F/${e}E)</span></div>`);
+  }
+  if (t > 0) {
+    const tf = scan.bin_tentative_filled_count || 0;
+    const te = scan.bin_tentative_empty_count || 0;
+    rows.push(`<div><span class="text-yellow-400">${t}</span> <span class="text-gray-500">(${tf}F/${te}E)</span></div>`);
+  }
+  return rows.join('');
 }
 
 function fmtBinConf(scan) {
@@ -1008,11 +1028,14 @@ function renderTable() {
         const groupScans = displayScans.filter(s => (s.facility_name || '-').toLowerCase() === groupKey);
         const groupCount = groupScans.length;
         const groupDomain = groupScans.find(s => s.domain)?.domain || '';
-        const anyBins = groupScans.some(s => s.bin_present === true);
+        const anyConfirmed = groupScans.some(s => (s.bin_count || 0) > 0);
+        const anyTentative = groupScans.some(s => (s.bin_tentative_count || 0) > 0);
         const allPending = groupScans.every(s => !s.bin_present && s.status !== 'completed');
-        const binIcon = allPending ? '' : anyBins
-          ? '<span class="text-green-400 ml-2" title="Bins found">&#10003;</span>'
-          : '<span class="text-red-400 ml-2" title="No bins found">&#10007;</span>';
+        const binIcon = allPending ? '' : anyConfirmed
+          ? '<span class="text-green-400 ml-2" title="Confirmed bins found">&#10003;</span>'
+          : anyTentative
+            ? '<span class="text-yellow-400 ml-2" title="Tentative bins found">&#10003;</span>'
+            : '<span class="text-red-400 ml-2" title="No bins found">&#10007;</span>';
         html += `<tr class="bg-gray-800/70 border-l-2 border-blue-500 cursor-pointer hover:bg-gray-700/70 transition" data-group="${escAttr(groupKey)}">
           <td colspan="11" class="px-3 py-2">
             <span class="text-gray-500 text-xs mr-1">${chevron}</span>
@@ -1498,8 +1521,10 @@ function renderDetail(scan) {
       const binIn = binStep && binStep.input_summary ? binStep.input_summary : {};
       const chunkResults = binOut.chunk_results || [];
       const totalBins = binOut.total_bins || 0;
+      const tentativeBins = binOut.tentative_bins || 0;
       const binTokensTotal = binStep ? (binStep.ai_tokens_total || 0) : 0;
       const minConfidence = parseInt(S.settings.bin_detection_min_confidence) || binIn.min_confidence || 50;
+      const tentativeConfidence = parseInt(S.settings.bin_detection_tentative_confidence) || binIn.tentative_confidence || 60;
       const binDur = binStep && binStep.duration_ms != null ? (binStep.duration_ms / 1000).toFixed(1) : '?';
       const binModel = binStep ? (binStep.ai_model || '?') : '?';
       const bds = scan.bin_detection_status;
@@ -1515,7 +1540,12 @@ function renderDetail(scan) {
       html += `<span class="text-gray-300">Grid: <span class="text-gray-100 font-medium">${esc(gridLabel)}</span> = ${chunkCount} chunks (${esc(String(maxChunkM))}m)</span>`;
       html += `<span class="text-gray-500">|</span>`;
       if (totalBins > 0) {
-        html += `<span class="text-green-400 font-medium">&#10003; ${totalBins} bin${totalBins !== 1 ? 's' : ''} detected</span>`;
+        html += `<span class="text-green-400 font-medium">&#10003; ${totalBins} bin${totalBins !== 1 ? 's' : ''}</span>`;
+        if (tentativeBins > 0) {
+          html += `<span class="text-yellow-400 font-medium"> + ${tentativeBins} tentative</span>`;
+        }
+      } else if (tentativeBins > 0) {
+        html += `<span class="text-yellow-400 font-medium">&#10003; ${tentativeBins} tentative bin${tentativeBins !== 1 ? 's' : ''}</span>`;
       } else {
         html += `<span class="text-gray-500">0 bins detected</span>`;
       }
@@ -1533,6 +1563,9 @@ function renderDetail(scan) {
         html += `<span class="text-yellow-400">Filled: <span class="font-medium">${scan.bin_filled_count || 0}</span></span>`;
         html += `<span class="text-gray-400">Empty: <span class="font-medium">${scan.bin_empty_count || 0}</span></span>`;
         html += `<span class="text-gray-300">Confidence: <span class="font-medium">${scan.bin_confidence}%</span></span>`;
+        if (tentativeBins > 0) {
+          html += `<span class="text-yellow-400">(+ ${tentativeBins} tentative)</span>`;
+        }
         html += `</div>`;
       } else if (bds) {
         html += '<div class="mt-1 text-gray-500">No bins detected</div>';
@@ -1553,26 +1586,33 @@ function renderDetail(scan) {
           return;
         }
 
-        // Successful chunk — use overall_confidence (min of per-bin confs, same as backend save gate)
+        // Successful chunk — tiered confidence: confirmed (green), tentative (yellow), below (gray)
         const crBins = cr.bins || [];
         const crReasoning = cr.reasoning || '';
         const crTokens = cr.total_tokens || 0;
         const crConf = cr.overall_confidence || 0;
         const binCountStr = cr.total_bins || 0;
+        const crTentative = cr.tentative_bins || 0;
         const crFilled = cr.filled_or_partial_count || 0;
         const crEmpty = cr.empty_or_unclear_count || 0;
         const hasBins = binCountStr > 0;
-        const passesGate = hasBins && crConf >= minConfidence;
+        const hasTentative = crTentative > 0;
+        const isConfirmed = hasBins && crConf >= minConfidence;
+        const isTentative = !isConfirmed && hasTentative && crConf >= tentativeConfidence;
 
         html += `<details class="text-xs">`;
         html += `<summary class="cursor-pointer hover:text-gray-300 text-gray-400 bg-gray-900 rounded px-3 py-1">`;
-        html += `<span class="font-medium ${passesGate ? 'text-green-400' : hasBins ? 'text-yellow-600' : 'text-gray-300'}">${esc(label)}</span>: `;
-        if (hasBins) {
-          html += `<span class="text-gray-300">${binCountStr} bin${binCountStr !== 1 ? 's' : ''}</span>`;
+        html += `<span class="font-medium ${isConfirmed ? 'text-green-400' : isTentative ? 'text-yellow-400' : (hasBins || hasTentative) ? 'text-yellow-600' : 'text-gray-300'}">${esc(label)}</span>: `;
+        if (hasBins || hasTentative) {
+          if (hasBins) {
+            html += `<span class="text-green-400">${binCountStr} confirmed</span>`;
+          }
+          if (hasTentative) {
+            html += `${hasBins ? ' + ' : ''}<span class="text-yellow-400">${crTentative} tentative</span>`;
+          }
           html += ` <span class="text-yellow-400">${crFilled}F</span>`;
           html += ` <span class="text-gray-500">${crEmpty}E</span>`;
-          html += ` <span class="${passesGate ? 'text-gray-300' : 'text-yellow-600'}">conf ${crConf}%</span>`;
-          if (!passesGate) html += ` <span class="text-yellow-700">(below ${minConfidence}%)</span>`;
+          html += ` <span class="${isConfirmed ? 'text-gray-300' : isTentative ? 'text-yellow-400' : 'text-yellow-600'}">conf ${crConf}%</span>`;
         } else {
           html += `<span class="text-gray-500">0 bins</span>`;
         }
@@ -1921,6 +1961,7 @@ async function loadSettings() {
     document.getElementById('set-bin-detection-model').value = s.bin_detection_model || '';
     document.getElementById('set-bin-max-chunk').value = s.bin_detection_max_chunk_m || '';
     document.getElementById('set-bin-min-confidence').value = s.bin_detection_min_confidence || '50';
+    document.getElementById('set-bin-tentative-confidence').value = s.bin_detection_tentative_confidence || '60';
     document.getElementById('set-bin-delete-final').checked = (s.bin_delete_final_image || 'false') === 'true';
     document.getElementById('set-bin-resize-final').checked = (s.bin_resize_final_image || 'false') === 'true';
     document.getElementById('set-bin-reasoning').checked = (s.bin_detection_reasoning || 'true') === 'true';
@@ -2000,6 +2041,8 @@ async function saveSettings(e) {
   if (bmc) body.bin_detection_max_chunk_m = bmc;
   const bmnc = document.getElementById('set-bin-min-confidence').value.trim();
   if (bmnc) body.bin_detection_min_confidence = bmnc;
+  const btc = document.getElementById('set-bin-tentative-confidence').value.trim();
+  if (btc) body.bin_detection_tentative_confidence = btc;
   body.bin_delete_final_image = document.getElementById('set-bin-delete-final').checked ? 'true' : 'false';
   body.bin_resize_final_image = document.getElementById('set-bin-resize-final').checked ? 'true' : 'false';
   body.bin_detection_reasoning = document.getElementById('set-bin-reasoning').checked ? 'true' : 'false';

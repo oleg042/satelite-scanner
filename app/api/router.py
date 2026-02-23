@@ -155,6 +155,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         bin_detection_model=settings_dict.get("bin_detection_model", ""),
         bin_detection_max_chunk_m=settings_dict.get("bin_detection_max_chunk_m", ""),
         bin_detection_min_confidence=settings_dict.get("bin_detection_min_confidence", ""),
+        bin_detection_tentative_confidence=settings_dict.get("bin_detection_tentative_confidence", ""),
         bin_delete_final_image=settings_dict.get("bin_delete_final_image", "false"),
         bin_resize_final_image=settings_dict.get("bin_resize_final_image", "false"),
         bin_detection_reasoning=settings_dict.get("bin_detection_reasoning", "true"),

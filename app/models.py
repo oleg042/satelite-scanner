@@ -107,6 +107,9 @@ class Scan(Base):
     bin_empty_count = Column(Integer, nullable=True)
     bin_confidence = Column(Integer, nullable=True)
     bin_detection_status = Column(Text, nullable=True)
+    bin_tentative_count = Column(Integer, nullable=True)
+    bin_tentative_filled_count = Column(Integer, nullable=True)
+    bin_tentative_empty_count = Column(Integer, nullable=True)
 
     # Error / skip
     error_message = Column(Text, nullable=True)

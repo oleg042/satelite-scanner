@@ -137,6 +137,12 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         bin_detection_min_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_min_confidence", "50"))))
     except (ValueError, TypeError):
         bin_detection_min_confidence = 50
+    try:
+        bin_detection_tentative_confidence = max(0, min(100, int(await _get_setting(db, "bin_detection_tentative_confidence", "60"))))
+    except (ValueError, TypeError):
+        bin_detection_tentative_confidence = 60
+    if bin_detection_tentative_confidence >= bin_detection_min_confidence:
+        bin_detection_tentative_confidence = max(0, bin_detection_min_confidence - 10)
     bin_delete_final_image = (await _get_setting(db, "bin_delete_final_image", "false")).lower() == "true"
     bin_resize_final_image = (await _get_setting(db, "bin_resize_final_image", "false")).lower() == "true"
     bin_detection_reasoning = (await _get_setting(db, "bin_detection_reasoning", "true")).lower() == "true"
@@ -165,6 +171,7 @@ async def _get_scan_config(db: AsyncSession, scan: Scan) -> dict:
         "bin_detection_model": bin_detection_model,
         "bin_detection_max_chunk_m": bin_detection_max_chunk_m,
         "bin_detection_min_confidence": bin_detection_min_confidence,
+        "bin_detection_tentative_confidence": bin_detection_tentative_confidence,
         "bin_delete_final_image": bin_delete_final_image,
         "bin_resize_final_image": bin_resize_final_image,
         "bin_detection_reasoning": bin_detection_reasoning,
@@ -302,6 +309,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
     scan.image_width = scan.image_height = None
     scan.skip_reason = None
     scan.bin_present = scan.bin_count = scan.bin_filled_count = scan.bin_empty_count = None
+    scan.bin_tentative_count = scan.bin_tentative_filled_count = scan.bin_tentative_empty_count = None
     scan.bin_confidence = scan.bin_detection_status = None
     scan.osm_duration_ms = scan.ai_duration_ms = scan.tile_duration_ms = None
     scan.completed_at = None
@@ -1163,6 +1171,7 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     delete_final_image=config["bin_delete_final_image"],
                     resize_final_image=config["bin_resize_final_image"],
                     include_reasoning=config["bin_detection_reasoning"],
+                    tentative_confidence=config["bin_detection_tentative_confidence"],
                 )
                 step_num += 1  # execute_bin_detection records 2 steps (chunking + detection)
             except Exception as e:

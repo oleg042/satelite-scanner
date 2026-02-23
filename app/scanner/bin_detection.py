@@ -45,6 +45,9 @@ class BinDetectionResult:
     total_completion_tokens: int = 0
     total_tokens: int = 0
     raw_responses: list[str] = field(default_factory=list)
+    tentative_bins: int = 0
+    tentative_filled_count: int = 0
+    tentative_empty_count: int = 0
 
 
 def calculate_chunk_grid(
@@ -268,6 +271,7 @@ async def run_bin_detection(
     prompt_template: str,
     max_chunk_m: float = 100.0,
     min_confidence: int = 50,
+    tentative_confidence: int,
     include_reasoning: bool = True,
 ) -> BinDetectionResult:
     """Run bin detection on a final satellite image.
@@ -320,6 +324,9 @@ async def run_bin_detection(
     total_bins = 0
     filled_count = 0
     empty_count = 0
+    tentative_bins_count = 0
+    tentative_filled = 0
+    tentative_empty = 0
     chunks_with_bins = 0
     chunks_failed = 0
     confidences = []
@@ -353,16 +360,19 @@ async def run_bin_detection(
         chunk_bin_present = parsed.get("bin_present", False)
         chunk_bins = parsed.get("bins", [])
 
-        # Count only bins meeting the confidence threshold
-        bins_above = [b for b in chunk_bins if b.get("confidence", 0) >= min_confidence]
+        # Tiered filtering: confirmed (>= min_confidence) + tentative (>= tentative, < min)
+        bins_confirmed = [b for b in chunk_bins if b.get("confidence", 0) >= min_confidence]
+        bins_tentative = [b for b in chunk_bins if tentative_confidence <= b.get("confidence", 0) < min_confidence]
+        bins_above = bins_confirmed + bins_tentative
 
         chunk_result = {
             "col": chunk["col"], "row": chunk["row"],
             "status": "success",
             "bin_present": chunk_bin_present,
-            "total_bins": len(bins_above),
-            "filled_or_partial_count": sum(1 for b in bins_above if b.get("fill_status") == "filled_or_partial"),
-            "empty_or_unclear_count": sum(1 for b in bins_above if b.get("fill_status") != "filled_or_partial"),
+            "total_bins": len(bins_confirmed),
+            "tentative_bins": len(bins_tentative),
+            "filled_or_partial_count": sum(1 for b in bins_confirmed if b.get("fill_status") == "filled_or_partial"),
+            "empty_or_unclear_count": sum(1 for b in bins_confirmed if b.get("fill_status") != "filled_or_partial"),
             "overall_confidence": max((b.get("confidence", 0) for b in bins_above), default=0),
             "bins": chunk_bins,
             "reasoning": parsed.get("reasoning", ""),
@@ -378,22 +388,29 @@ async def run_bin_detection(
 
             for bin_item in chunk_bins:
                 bin_conf = bin_item.get("confidence", 0)
-                # Only include bins above the confidence threshold in aggregates
-                if bin_conf < min_confidence:
+                if bin_conf < tentative_confidence:
                     continue
-
-                confidences.append(bin_conf)
 
                 converted_bin = {**bin_item}
                 converted_bin["source_chunk"] = {"col": chunk["col"], "row": chunk["row"]}
-                all_bins.append(converted_bin)
 
-                if bin_item.get("fill_status") == "filled_or_partial":
-                    filled_count += 1
+                if bin_conf >= min_confidence:
+                    # Confirmed bin
+                    confidences.append(bin_conf)
+                    all_bins.append(converted_bin)
+                    if bin_item.get("fill_status") == "filled_or_partial":
+                        filled_count += 1
+                    else:
+                        empty_count += 1
+                    total_bins += 1
                 else:
-                    empty_count += 1
-
-                total_bins += 1
+                    # Tentative bin
+                    all_bins.append(converted_bin)
+                    if bin_item.get("fill_status") == "filled_or_partial":
+                        tentative_filled += 1
+                    else:
+                        tentative_empty += 1
+                    tentative_bins_count += 1
 
         # Collect reasoning
         reasoning = parsed.get("reasoning", "")
@@ -413,7 +430,7 @@ async def run_bin_detection(
         all_notes.append(f"{chunks_failed} chunk(s) failed — results may be partial")
 
     return BinDetectionResult(
-        bin_present=total_bins > 0,
+        bin_present=(total_bins + tentative_bins_count) > 0,
         total_bins=total_bins,
         filled_or_partial_count=filled_count,
         empty_or_unclear_count=empty_count,
@@ -428,6 +445,9 @@ async def run_bin_detection(
         total_completion_tokens=total_completion_tokens,
         total_tokens=total_tokens,
         raw_responses=raw_responses,
+        tentative_bins=tentative_bins_count,
+        tentative_filled_count=tentative_filled,
+        tentative_empty_count=tentative_empty,
     )
 
 
@@ -446,6 +466,7 @@ async def execute_bin_detection(
     delete_final_image: bool = False,
     resize_final_image: bool = False,
     include_reasoning: bool = True,
+    tentative_confidence: int,
 ) -> dict:
     """Full bin detection workflow: chunk, detect, save screenshots, record steps.
 
@@ -523,6 +544,7 @@ async def execute_bin_detection(
         scan.bbox_width_m, scan.bbox_height_m,
         api_key, model, prompt, max_chunk_m,
         min_confidence=min_confidence,
+        tentative_confidence=tentative_confidence,
         include_reasoning=include_reasoning,
     )
 
@@ -533,6 +555,9 @@ async def execute_bin_detection(
     scan.bin_filled_count = bin_result.filled_or_partial_count
     scan.bin_empty_count = bin_result.empty_or_unclear_count
     scan.bin_confidence = bin_result.overall_confidence
+    scan.bin_tentative_count = bin_result.tentative_bins
+    scan.bin_tentative_filled_count = bin_result.tentative_filled_count
+    scan.bin_tentative_empty_count = bin_result.tentative_empty_count
 
     if bin_result.chunks_failed > 0 and bin_result.chunks_failed < bin_result.chunks_total:
         scan.bin_detection_status = "partial"
@@ -547,7 +572,7 @@ async def execute_bin_detection(
         for cr in bin_result.chunk_results:
             if cr.get("status") == "success" and cr.get("bin_present"):
                 chunk_conf = cr.get("overall_confidence", 0)
-                if chunk_conf < min_confidence:
+                if chunk_conf < tentative_confidence:
                     continue
                 matching = [c for c in chunk_grid
                             if c["col"] == cr["col"] and c["row"] == cr["row"]]
@@ -576,7 +601,7 @@ async def execute_bin_detection(
     bin_elapsed = int((bin_completed - bin_step_started).total_seconds() * 1000)
 
     bin_decision = (
-        f"Detected {bin_result.total_bins} bins "
+        f"Detected {bin_result.total_bins} confirmed + {bin_result.tentative_bins} tentative bins "
         f"({bin_result.filled_or_partial_count} filled, "
         f"{bin_result.empty_or_unclear_count} empty) "
         f"across {bin_result.chunks_total} chunks. "
@@ -595,11 +620,15 @@ async def execute_bin_detection(
             "chunk_count": bin_result.chunks_total,
             "model": model,
             "min_confidence": min_confidence,
+            "tentative_confidence": tentative_confidence,
             "include_reasoning": include_reasoning,
         }),
         output_summary=json.dumps({
             "bin_present": bin_result.bin_present,
             "total_bins": bin_result.total_bins,
+            "tentative_bins": bin_result.tentative_bins,
+            "tentative_filled_count": bin_result.tentative_filled_count,
+            "tentative_empty_count": bin_result.tentative_empty_count,
             "filled_or_partial_count": bin_result.filled_or_partial_count,
             "empty_or_unclear_count": bin_result.empty_or_unclear_count,
             "overall_confidence": bin_result.overall_confidence,
@@ -665,6 +694,7 @@ async def execute_bin_detection(
         "status": scan.bin_detection_status,
         "bin_present": bin_result.bin_present,
         "total_bins": bin_result.total_bins,
+        "tentative_bins": bin_result.tentative_bins,
         "filled_or_partial_count": bin_result.filled_or_partial_count,
         "empty_or_unclear_count": bin_result.empty_or_unclear_count,
         "overall_confidence": bin_result.overall_confidence,

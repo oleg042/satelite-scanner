@@ -48,6 +48,7 @@ DEFAULT_SETTINGS = {
     "bin_detection_enabled": "false",
     "bin_detection_model": "gpt-5.2",
     "bin_detection_max_chunk_m": "100",
+    "bin_detection_tentative_confidence": "60",
     # Infrastructure (require restart)
     "worker_concurrency": str(settings.worker_concurrency),
     "heavy_phase_concurrency": str(settings.heavy_phase_concurrency),
@@ -145,6 +146,9 @@ async def _init_db():
         await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_empty_count INTEGER"))
         await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_confidence INTEGER"))
         await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_detection_status TEXT"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_tentative_count INTEGER"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_tentative_filled_count INTEGER"))
+        await conn.execute(text("ALTER TABLE scans ADD COLUMN IF NOT EXISTS bin_tentative_empty_count INTEGER"))
 
     logger.info("Database tables ready")
 
