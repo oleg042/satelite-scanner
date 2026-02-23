@@ -958,7 +958,7 @@ function renderTable() {
   const loading = document.getElementById('loading-state');
   loading.classList.add('hidden');
 
-  const sorted = sortScans(S.scans);
+  const sorted = (S.sortField === 'index') ? sortScans(S.scans) : S.scans;
 
   if (sorted.length === 0) {
     tbody.innerHTML = '';
@@ -1831,6 +1831,10 @@ async function fetchScans() {
   const params = getFilterParams();
   params.set('limit', S.limit);
   params.set('offset', S.offset);
+  if (S.sortField && S.sortField !== 'index') {
+    params.set('sort', S.sortField);
+    params.set('sort_dir', S.sortDir);
+  }
 
   try {
     const newScans = await api('GET', `/api/scans?${params}`);
@@ -2660,7 +2664,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       document.querySelectorAll('th[data-sort]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
       th.classList.add(S.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
-      renderTable();
+      if (field === 'index') {
+        renderTable();
+      } else {
+        S.offset = 0;
+        fetchScans();
+      }
     });
   });
 

@@ -6,7 +6,7 @@ import os
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select
+from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
@@ -205,6 +205,15 @@ def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=N
     return q
 
 
+_SCAN_SORT_FIELDS = {
+    "facility_name": Scan.facility_name,
+    "status": Scan.status,
+    "started_at": Scan.started_at,
+    "bbox": Scan.bbox_width_m * Scan.bbox_height_m,
+    "id": Scan.id,
+}
+
+
 @router.get("/scans", response_model=list[ScanResponse])
 async def list_scans(
     status: str | None = Query(None),
@@ -212,13 +221,22 @@ async def list_scans(
     method: str | None = Query(None),
     bins: str | None = Query(None),
     search: str | None = Query(None),
+    sort: str | None = Query(None),
+    sort_dir: str = Query("desc"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     """List scans with optional filtering and facility name/address search."""
-    q = select(Scan).order_by(Scan.id.desc())
+    q = select(Scan)
     q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+
+    sort_expr = _SCAN_SORT_FIELDS.get(sort)
+    if sort_expr is not None:
+        direction = asc if sort_dir == "asc" else desc
+        q = q.order_by(direction(sort_expr))
+    else:
+        q = q.order_by(Scan.id.desc())
 
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
