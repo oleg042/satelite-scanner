@@ -269,9 +269,9 @@ async def run_bin_detection(
     api_key: str,
     model: str,
     prompt_template: str,
-    max_chunk_m: float = 100.0,
-    min_confidence: int = 50,
+    min_confidence: int,
     tentative_confidence: int,
+    max_chunk_m: float = 100.0,
     include_reasoning: bool = True,
 ) -> BinDetectionResult:
     """Run bin detection on a final satellite image.
@@ -460,13 +460,13 @@ async def execute_bin_detection(
     prompt: str,
     max_chunk_m: float,
     min_confidence: int,
+    tentative_confidence: int,
     step_num_start: int,
     volume_path: str,
     clean_old: bool = True,
     delete_final_image: bool = False,
     resize_final_image: bool = False,
     include_reasoning: bool = True,
-    tentative_confidence: int,
 ) -> dict:
     """Full bin detection workflow: chunk, detect, save screenshots, record steps.
 
@@ -542,9 +542,10 @@ async def execute_bin_detection(
     bin_result = await run_bin_detection(
         final_image_path,
         scan.bbox_width_m, scan.bbox_height_m,
-        api_key, model, prompt, max_chunk_m,
+        api_key, model, prompt,
         min_confidence=min_confidence,
         tentative_confidence=tentative_confidence,
+        max_chunk_m=max_chunk_m,
         include_reasoning=include_reasoning,
     )
 
