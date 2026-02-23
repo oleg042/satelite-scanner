@@ -247,6 +247,22 @@ async def scan_stats(
     return ScanStatsResponse(total=row.total, completed=row.completed, bins_found=row.bins_found)
 
 
+@router.get("/scans/ids")
+async def scan_ids(
+    status: str | None = Query(None),
+    exclude_status: str | None = Query(None),
+    method: str | None = Query(None),
+    bins: str | None = Query(None),
+    search: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all scan IDs matching current filters (no pagination)."""
+    q = select(Scan.id).order_by(Scan.id.desc())
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+    result = await db.execute(q)
+    return {"ids": [str(row[0]) for row in result.all()]}
+
+
 @router.delete("/scans", status_code=200)
 async def delete_scans(
     scan_ids: list[UUID] = Body(..., embed=True),

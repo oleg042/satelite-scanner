@@ -186,13 +186,26 @@
       </div>
     </div>
 
+    <!-- All-matching-selected banner -->
+    <div id="all-selected-banner" class="hidden mx-6 mt-2 px-4 py-2 bg-blue-900/40 border border-blue-700/50 rounded-lg text-sm text-blue-300 flex items-center justify-between">
+      <span>All <strong id="all-selected-count">0</strong> scans matching current filters are selected.</span>
+      <button id="all-selected-clear" class="text-blue-400 hover:text-blue-200 underline ml-4">Clear selection</button>
+    </div>
+
     <!-- Table (scrollable) -->
     <div class="flex-1 overflow-auto px-6 py-4">
       <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="sticky top-0 bg-gray-900 z-10">
             <tr class="border-b border-gray-800 text-gray-400 text-left">
-              <th class="px-3 py-2.5 w-8"><input id="select-all" type="checkbox" class="rounded bg-gray-800 border-gray-600 cursor-pointer"></th>
+              <th class="px-3 py-2.5 w-8 relative" id="select-all-th">
+                <input id="select-all" type="checkbox" class="rounded bg-gray-800 border-gray-600 cursor-pointer">
+                <div id="select-dropdown" class="hidden absolute left-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 min-w-[200px] py-1 text-sm font-normal text-gray-300">
+                  <button id="sel-page" class="w-full text-left px-3 py-2 hover:bg-gray-700 transition">Select this page (<span id="sel-page-count">50</span>)</button>
+                  <button id="sel-all" class="w-full text-left px-3 py-2 hover:bg-gray-700 transition">Select all (<span id="sel-all-count">0</span>)</button>
+                  <button id="sel-clear" class="hidden w-full text-left px-3 py-2 hover:bg-gray-700 transition text-red-400">Clear selection</button>
+                </div>
+              </th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="index">#</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="facility_name">Facility</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Search</th>
@@ -690,6 +703,7 @@ const S = {
   groupByCompany: false,
   collapsedGroups: new Set(),
   _detectingIds: new Set(),
+  allMatchingSelected: false,
 };
 
 // --- Router ---
@@ -1098,7 +1112,7 @@ function renderTable() {
         }
       } else {
         if (cb.checked) S.selected.add(cb.dataset.id);
-        else S.selected.delete(cb.dataset.id);
+        else { S.selected.delete(cb.dataset.id); S.allMatchingSelected = false; }
       }
       S.lastCheckedIdx = idx;
       updateSelectionBtns();
@@ -1675,6 +1689,19 @@ function updateSelectionBtns() {
   document.getElementById('scan-selected-count').textContent = count;
   scanBtn.disabled = count === 0;
 
+  // All-selected banner
+  const banner = document.getElementById('all-selected-banner');
+  const showBanner = S.allMatchingSelected && count > S.scans.length;
+  banner.classList.toggle('hidden', !showBanner);
+  if (showBanner) document.getElementById('all-selected-count').textContent = count;
+
+  // Dropdown clear button visibility
+  const selClear = document.getElementById('sel-clear');
+  if (selClear) selClear.classList.toggle('hidden', count === 0);
+
+  // Update dropdown page count
+  const selPageCount = document.getElementById('sel-page-count');
+  if (selPageCount) selPageCount.textContent = S.scans.length;
 }
 
 async function deleteSelected() {
@@ -1684,14 +1711,23 @@ async function deleteSelected() {
 
   const btn = document.getElementById('delete-btn');
   btn.disabled = true;
-  btn.textContent = 'Deleting...';
+  const CHUNK = 200;
+  let totalDeleted = 0;
 
   try {
-    const res = await api('DELETE', '/api/scans', { scan_ids: ids });
-    toast(`Deleted ${res.deleted} scan${res.deleted !== 1 ? 's' : ''}`);
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      btn.textContent = ids.length > CHUNK
+        ? `Deleting ${i}/${ids.length}...`
+        : 'Deleting...';
+      const res = await api('DELETE', '/api/scans', { scan_ids: chunk });
+      totalDeleted += res.deleted;
+    }
+    toast(`Deleted ${totalDeleted} scan${totalDeleted !== 1 ? 's' : ''}`);
     const deleted = new Set(ids);
     S.scans = S.scans.filter(s => !deleted.has(s.id));
     S.selected.clear();
+    S.allMatchingSelected = false;
     updateSelectionBtns();
     renderTable();
     fetchScans();
@@ -1711,16 +1747,26 @@ async function scanSelected() {
 
   const btn = document.getElementById('scan-selected-btn');
   btn.disabled = true;
-  btn.textContent = 'Enqueuing...';
+  const CHUNK = 200;
+  let totalQueued = 0, totalSkipped = 0;
 
   try {
-    const res = await api('POST', '/api/scans/enqueue', { scan_ids: ids });
-    let msg = `Queued ${res.queued} scan${res.queued !== 1 ? 's' : ''}`;
-    if (res.skipped_no_coords > 0) msg += ` (${res.skipped_no_coords} skipped — no coords)`;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      btn.textContent = ids.length > CHUNK
+        ? `Enqueuing ${i}/${ids.length}...`
+        : 'Enqueuing...';
+      const res = await api('POST', '/api/scans/enqueue', { scan_ids: chunk });
+      totalQueued += res.queued;
+      totalSkipped += res.skipped_no_coords || 0;
+    }
+    let msg = `Queued ${totalQueued} scan${totalQueued !== 1 ? 's' : ''}`;
+    if (totalSkipped > 0) msg += ` (${totalSkipped} skipped — no coords)`;
     toast(msg);
     // Invalidate trace cache for re-queued scans
     ids.forEach(id => { delete S.expanded[id]; });
     S.selected.clear();
+    S.allMatchingSelected = false;
     updateSelectionBtns();
     fetchScans();
     fetchHealth();
@@ -1755,16 +1801,34 @@ async function scanAllPending() {
   }
 }
 
-// --- Fetch scans ---
-async function fetchScans() {
+// --- Filter params helper ---
+function getFilterParams() {
   const params = new URLSearchParams();
+  const status = document.getElementById('filter-status').value;
   const bins = document.getElementById('filter-bins').value;
   const search = document.getElementById('search-input').value.trim();
-
-  const status = document.getElementById('filter-status').value;
   if (status) params.set('status', status);
   if (bins) params.set('bins', bins);
   if (search) params.set('search', search);
+  return params;
+}
+
+async function selectAllMatchingScans() {
+  try {
+    const res = await api('GET', `/api/scans/ids?${getFilterParams()}`);
+    S.selected = new Set(res.ids);
+    S.allMatchingSelected = true;
+    updateSelectionBtns();
+    renderTable();
+    toast(`Selected all ${res.ids.length} matching scans`);
+  } catch (e) {
+    toast('Failed to select all: ' + e.message, 'error');
+  }
+}
+
+// --- Fetch scans ---
+async function fetchScans() {
+  const params = getFilterParams();
   params.set('limit', S.limit);
   params.set('offset', S.offset);
 
@@ -1796,13 +1860,7 @@ async function fetchScans() {
 }
 
 async function fetchStats() {
-  const params = new URLSearchParams();
-  const status = document.getElementById('filter-status').value;
-  const bins = document.getElementById('filter-bins').value;
-  const search = document.getElementById('search-input').value.trim();
-  if (status) params.set('status', status);
-  if (bins) params.set('bins', bins);
-  if (search) params.set('search', search);
+  const params = getFilterParams();
   try {
     const s = await api('GET', `/api/scans/stats?${params}`);
     document.getElementById('stat-total').textContent = s.total;
@@ -2469,13 +2527,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('save-password-btn').addEventListener('click', savePassword);
 
   // Filters
+  function resetSelection() { S.selected.clear(); S.allMatchingSelected = false; updateSelectionBtns(); }
   let searchTimer;
   document.getElementById('search-input').addEventListener('input', () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => { S.offset = 0; fetchScans(); }, 300);
+    searchTimer = setTimeout(() => { S.offset = 0; resetSelection(); fetchScans(); }, 300);
   });
-  document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; fetchScans(); });
-  document.getElementById('filter-bins').addEventListener('change', () => { S.offset = 0; fetchScans(); });
+  document.getElementById('filter-status').addEventListener('change', () => { S.offset = 0; resetSelection(); fetchScans(); });
+  document.getElementById('filter-bins').addEventListener('change', () => { S.offset = 0; resetSelection(); fetchScans(); });
 
   // Group-by-company toggle (switch)
   document.getElementById('group-toggle').addEventListener('change', (e) => {
@@ -2518,13 +2577,55 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Select all checkbox
+  // Select-all checkbox (quick click = toggle this page)
   document.getElementById('select-all').addEventListener('change', (e) => {
     const checked = e.target.checked;
     S.scans.forEach(s => {
       if (checked) S.selected.add(s.id);
       else S.selected.delete(s.id);
     });
+    if (!checked) S.allMatchingSelected = false;
+    updateSelectionBtns();
+    renderTable();
+  });
+
+  // Select-all dropdown (hover)
+  const selTh = document.getElementById('select-all-th');
+  const selDrop = document.getElementById('select-dropdown');
+  let dropTimer;
+  selTh.addEventListener('mouseenter', () => {
+    clearTimeout(dropTimer);
+    // Update "Select all (N)" count from stats
+    const total = document.getElementById('stat-total').textContent;
+    document.getElementById('sel-all-count').textContent = total;
+    document.getElementById('sel-page-count').textContent = S.scans.length;
+    dropTimer = setTimeout(() => selDrop.classList.remove('hidden'), 150);
+  });
+  selTh.addEventListener('mouseleave', () => {
+    clearTimeout(dropTimer);
+    dropTimer = setTimeout(() => selDrop.classList.add('hidden'), 150);
+  });
+  document.getElementById('sel-page').addEventListener('click', () => {
+    S.scans.forEach(s => S.selected.add(s.id));
+    S.allMatchingSelected = false;
+    updateSelectionBtns();
+    renderTable();
+    selDrop.classList.add('hidden');
+  });
+  document.getElementById('sel-all').addEventListener('click', () => {
+    selDrop.classList.add('hidden');
+    selectAllMatchingScans();
+  });
+  document.getElementById('sel-clear').addEventListener('click', () => {
+    S.selected.clear();
+    S.allMatchingSelected = false;
+    updateSelectionBtns();
+    renderTable();
+    selDrop.classList.add('hidden');
+  });
+  document.getElementById('all-selected-clear').addEventListener('click', () => {
+    S.selected.clear();
+    S.allMatchingSelected = false;
     updateSelectionBtns();
     renderTable();
   });
