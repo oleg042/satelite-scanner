@@ -170,6 +170,10 @@ async def lifespan(app: FastAPI):
 
     await _init_db()
 
+    # Restore persisted sessions so users survive redeploys
+    from app.auth import load_sessions
+    await load_sessions()
+
     # Read infrastructure settings from DB for startup initialization
     from app.database import async_session as _async_session
     from sqlalchemy import select as _select

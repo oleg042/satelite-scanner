@@ -100,7 +100,7 @@ async def login(req: LoginRequest):
     from app.auth import verify_password, create_session
     if not await verify_password(req.password):
         return JSONResponse({"detail": "Invalid password"}, status_code=401)
-    token = create_session()
+    token = await create_session()
     resp = JSONResponse({"ok": True})
     resp.set_cookie("session", token, httponly=True, samesite="lax", max_age=86400)
     return resp
@@ -186,6 +186,12 @@ async def update_settings(req: SettingsUpdate, db: AsyncSession = Depends(get_db
             db.add(Setting(key=key, value=value))
 
     await db.commit()
+
+    # Password change → invalidate all sessions so everyone re-authenticates
+    if "app_password" in updates:
+        from app.auth import clear_sessions
+        await clear_sessions()
+
     return await get_settings(db)
 
 
