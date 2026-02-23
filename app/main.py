@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.router import api_router, health_router, init_browser_semaphore, shutdown_browser
 from app.config import settings
@@ -52,6 +53,8 @@ DEFAULT_SETTINGS = {
     "heavy_phase_concurrency": str(settings.heavy_phase_concurrency),
     "browser_concurrency": str(settings.browser_concurrency),
     "stale_scan_timeout_minutes": str(settings.stale_scan_timeout_minutes),
+    # Authentication
+    "app_password": "1234",
 }
 
 
@@ -220,6 +223,24 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# --- Auth middleware ---
+_AUTH_EXEMPT = {"/api/login", "/api/auth/check"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        # Only gate /api/ routes (skip static, root, health)
+        if path.startswith("/api/") and path not in _AUTH_EXEMPT:
+            from app.auth import validate_session
+            token = request.cookies.get("session")
+            if not validate_session(token):
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
 
 app.include_router(api_router)
 app.include_router(health_router)

@@ -30,6 +30,23 @@
 <!-- Toast container -->
 <div id="toasts" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
+<!-- Login overlay -->
+<div id="login-overlay" class="fixed inset-0 z-[100] bg-gray-950/95 flex items-center justify-center">
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-8 w-full max-w-sm shadow-2xl">
+    <h2 class="text-xl font-bold mb-1 text-center">Satellite Scanner</h2>
+    <p class="text-sm text-gray-500 mb-6 text-center">Enter password to continue</p>
+    <form id="login-form" class="space-y-4">
+      <input id="login-password" type="password" placeholder="Password" autofocus
+        class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+      <button type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2.5 rounded transition-colors">
+        Login
+      </button>
+      <p id="login-error" class="text-red-400 text-sm text-center hidden"></p>
+    </form>
+  </div>
+</div>
+
 <!-- Sidebar -->
 <aside class="w-56 bg-gray-900 border-r border-gray-800 flex flex-col min-h-screen shrink-0">
   <!-- Logo -->
@@ -279,6 +296,17 @@
       <p class="text-sm text-gray-500 mb-6">Configure API keys, AI models, and scan defaults.</p>
 
       <form id="settings-form" class="space-y-6">
+        <!-- Authentication -->
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">Authentication</h3>
+          <div>
+            <label class="block text-sm text-gray-300 mb-1.5">App Password</label>
+            <input id="set-password" type="password" placeholder="Enter new password"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none max-w-md">
+            <p class="text-xs text-gray-600 mt-1">Leave blank to keep current password.</p>
+          </div>
+        </div>
+
         <!-- API Key -->
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">API Configuration</h3>
@@ -683,11 +711,54 @@ function handleHash() {
   navigate(hash);
 }
 
+// --- Auth ---
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/check');
+    if (res.ok) {
+      document.getElementById('login-overlay').classList.add('hidden');
+      return true;
+    }
+  } catch {}
+  document.getElementById('login-overlay').classList.remove('hidden');
+  return false;
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const pw = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (res.ok) {
+      document.getElementById('login-overlay').classList.add('hidden');
+      document.getElementById('login-password').value = '';
+      handleHash();
+      loadSettings();
+    } else {
+      errEl.textContent = 'Invalid password';
+      errEl.classList.remove('hidden');
+    }
+  } catch {
+    errEl.textContent = 'Connection error';
+    errEl.classList.remove('hidden');
+  }
+}
+
 // --- API helper ---
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
+  if (res.status === 401) {
+    document.getElementById('login-overlay').classList.remove('hidden');
+    throw new Error('Session expired');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || JSON.stringify(err));
@@ -1817,6 +1888,7 @@ async function loadSettings() {
   try {
     const s = await api('GET', '/api/settings');
     S.settings = s;
+    document.getElementById('set-password').value = '';
     document.getElementById('set-api-key').value = '';
     document.getElementById('set-api-key-mask').textContent = s.openai_api_key || 'not set';
     document.getElementById('set-serper-key').value = '';
@@ -1870,6 +1942,8 @@ async function resetPrompt(type) {
 async function saveSettings(e) {
   e.preventDefault();
   const body = {};
+  const pw = document.getElementById('set-password').value.trim();
+  if (pw) body.app_password = pw;
   const key = document.getElementById('set-api-key').value.trim();
   if (key) body.openai_api_key = key;
   const sk = document.getElementById('set-serper-key').value.trim();
@@ -2413,7 +2487,13 @@ async function submitImport() {
 }
 
 // --- Event listeners ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Login form
+  document.getElementById('login-form').addEventListener('submit', handleLogin);
+
+  // Check auth before loading app
+  const authed = await checkAuth();
+
   // Scan form
   document.getElementById('scan-form').addEventListener('submit', submitScan);
   document.getElementById('sf-resolve').addEventListener('click', handleResolve);
@@ -2526,14 +2606,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Router
   window.addEventListener('hashchange', handleHash);
-  handleHash();
+
+  if (authed) {
+    handleHash();
+    fetchHealth();
+    loadSettings();
+  }
 
   // Health polling
-  fetchHealth();
   setInterval(fetchHealth, 30000);
-
-  // Eagerly load settings so rendering has access to current thresholds
-  loadSettings();
 });
 </script>
 </body>

@@ -8,8 +8,9 @@ import shutil
 import urllib.parse
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,6 +89,32 @@ api_router.include_router(scans_router)
 api_router.include_router(screenshots_router)
 
 
+# --- Auth endpoints ---
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@api_router.post("/login")
+async def login(req: LoginRequest):
+    from app.auth import verify_password, create_session
+    if not await verify_password(req.password):
+        return JSONResponse({"detail": "Invalid password"}, status_code=401)
+    token = create_session()
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("session", token, httponly=True, samesite="lax", max_age=86400)
+    return resp
+
+
+@api_router.get("/auth/check")
+async def auth_check(request: Request):
+    from app.auth import validate_session
+    token = request.cookies.get("session")
+    if validate_session(token):
+        return {"authenticated": True}
+    return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+
 # --- Settings endpoints (inline since they're small) ---
 
 @api_router.get("/settings", response_model=SettingsResponse)
@@ -96,6 +123,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Setting))
     rows = result.scalars().all()
     settings_dict = {s.key: s.value for s in rows}
+    settings_dict.pop("app_password", None)
 
     # Mask API keys for security
     api_key = settings_dict.get("openai_api_key", "")

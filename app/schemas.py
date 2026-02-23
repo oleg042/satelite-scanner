@@ -70,6 +70,8 @@ class SettingsUpdate(BaseModel):
     heavy_phase_concurrency: Optional[str] = None
     browser_concurrency: Optional[str] = None
     stale_scan_timeout_minutes: Optional[str] = None
+    # Authentication
+    app_password: Optional[str] = None
 
 
 # --- Responses ---
