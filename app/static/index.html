@@ -179,10 +179,6 @@
           class="bg-green-700 hover:bg-green-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition">
           Scan Selected (<span id="scan-selected-count">0</span>)
         </button>
-        <button id="detect-bins-btn" disabled
-          class="bg-purple-700 hover:bg-purple-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition">
-          Detect Bins (<span id="detect-bins-count">0</span>)
-        </button>
         <button id="delete-btn" disabled
           class="bg-red-700 hover:bg-red-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded px-3 py-1.5 text-sm transition">
           Delete Selected (<span id="delete-count">0</span>)
@@ -1679,12 +1675,6 @@ function updateSelectionBtns() {
   document.getElementById('scan-selected-count').textContent = count;
   scanBtn.disabled = count === 0;
 
-  const binBtn = document.getElementById('detect-bins-btn');
-  if (!document.getElementById('detect-bins-count')) {
-    binBtn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
-  }
-  document.getElementById('detect-bins-count').textContent = count;
-  binBtn.disabled = count === 0;
 }
 
 async function deleteSelected() {
@@ -1741,52 +1731,6 @@ async function scanSelected() {
     btn.innerHTML = 'Scan Selected (<span id="scan-selected-count">0</span>)';
     updateSelectionBtns();
   }
-}
-
-function detectBinsSelected() {
-  const ids = [...S.selected];
-  if (ids.length === 0) return;
-
-  const btn = document.getElementById('detect-bins-btn');
-  btn.disabled = true;
-  btn.textContent = 'Detecting...';
-
-  // Track detecting IDs in durable state (survives fetchScans replacing S.scans)
-  ids.forEach(id => S._detectingIds.add(id));
-
-  // Clear selection immediately so user can keep working
-  S.selected.clear();
-  updateSelectionBtns();
-  renderTable();
-
-  // Ensure polling is active to pick up intermediate changes
-  if (!S.pollTimer) {
-    S.pollTimer = setInterval(fetchScans, 5000);
-  }
-
-  // Fire-and-forget: API call runs in background
-  api('POST', '/api/scans/detect-bins', { scan_ids: ids })
-    .then(res => {
-      let msg = `Bin detection: ${res.processed} processed`;
-      if (res.skipped > 0) msg += `, ${res.skipped} skipped`;
-      toast(msg);
-      // Clear detecting flags and invalidate trace cache
-      ids.forEach(id => {
-        S._detectingIds.delete(id);
-        delete S.expanded[id];
-      });
-      fetchScans();
-    })
-    .catch(e => {
-      ids.forEach(id => S._detectingIds.delete(id));
-      toast('Bin detection failed: ' + e.message, 'error');
-      renderTable();
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.innerHTML = 'Detect Bins (<span id="detect-bins-count">0</span>)';
-      updateSelectionBtns();
-    });
 }
 
 async function scanAllPending() {
@@ -2588,7 +2532,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Delete button
   document.getElementById('delete-btn').addEventListener('click', deleteSelected);
   document.getElementById('scan-selected-btn').addEventListener('click', scanSelected);
-  document.getElementById('detect-bins-btn').addEventListener('click', detectBinsSelected);
   document.getElementById('scan-pending-btn').addEventListener('click', scanAllPending);
 
   // Refresh
