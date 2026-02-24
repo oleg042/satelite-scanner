@@ -287,7 +287,7 @@ async def list_scans(
     sort_expr = _SCAN_SORT_FIELDS.get(sort)
     if sort_expr is not None:
         direction = asc if sort_dir == "asc" else desc
-        q = q.order_by(direction(sort_expr))
+        q = q.order_by(direction(sort_expr).nullslast())
     else:
         q = q.order_by(Scan.id.desc())
 

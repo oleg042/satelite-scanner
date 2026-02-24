@@ -698,6 +698,7 @@ const S = {
   offset: 0,
   limit: 50,
   expanded: {},
+  scanDetail: {},
   expandedOpen: {},
   selected: new Set(),
   lastCheckedIdx: null,
@@ -1275,9 +1276,10 @@ function renderDetail(scan) {
   const trace = S.expanded[scan.id];
   let html = '<div class="space-y-4">';
 
-  if (scan.screenshots && scan.screenshots.length > 0) {
+  const screenshots = (S.scanDetail[scan.id] || {}).screenshots || [];
+  if (screenshots.length > 0) {
     const ssOrder = { overview: 0, ai_overview: 1, final: 2, bin_chunk: 3, msft_overlay: 4 };
-    const sorted = [...scan.screenshots].sort((a, b) => (ssOrder[a.type] ?? 99) - (ssOrder[b.type] ?? 99));
+    const sorted = [...screenshots].sort((a, b) => (ssOrder[a.type] ?? 99) - (ssOrder[b.type] ?? 99));
     html += '<div class="flex flex-wrap gap-3">';
     sorted.forEach(ss => {
       const sizeParts = [];
@@ -1700,8 +1702,12 @@ async function toggleRow(scanId) {
   if (!S.expanded[scanId]) {
     renderTable();
     try {
-      const trace = await api('GET', `/api/scan/${scanId}/steps`);
+      const [trace, detail] = await Promise.all([
+        api('GET', `/api/scan/${scanId}/steps`),
+        api('GET', `/api/scan/${scanId}`),
+      ]);
       S.expanded[scanId] = trace;
+      S.scanDetail[scanId] = detail;
     } catch (e) {
       S.expanded[scanId] = { steps: [], error: e.message };
     }
@@ -1804,7 +1810,7 @@ async function scanSelected() {
     if (totalSkipped > 0) msg += ` (${totalSkipped} skipped — no coords)`;
     toast(msg);
     // Invalidate trace cache for re-queued scans
-    ids.forEach(id => { delete S.expanded[id]; });
+    ids.forEach(id => { delete S.expanded[id]; delete S.scanDetail[id]; });
     S.selected.clear();
     S.allMatchingSelected = false;
     updateSelectionBtns();
@@ -1829,8 +1835,9 @@ async function scanAllPending() {
     let msg = `Queued ${res.queued} pending scan${res.queued !== 1 ? 's' : ''}`;
     if (res.skipped_no_coords > 0) msg += ` (${res.skipped_no_coords} skipped — no coords)`;
     toast(msg);
-    // Invalidate all trace caches since we don't know which scans were pending
+    // Invalidate all trace/detail caches since we don't know which scans were pending
     S.expanded = {};
+    S.scanDetail = {};
     fetchScans();
     fetchHealth();
   } catch (e) {
@@ -1893,9 +1900,12 @@ async function fetchScans() {
       const old = oldMap[s.id];
       if (old && (old.status !== s.status || old.bin !== s.bin_detection_status)) {
         delete S.expanded[s.id];
+        delete S.scanDetail[s.id];
         if (S.expandedOpen[s.id]) {
-          api('GET', `/api/scan/${s.id}/steps`)
-            .then(trace => { S.expanded[s.id] = trace; renderTable(); })
+          Promise.all([
+            api('GET', `/api/scan/${s.id}/steps`),
+            api('GET', `/api/scan/${s.id}`),
+          ]).then(([trace, detail]) => { S.expanded[s.id] = trace; S.scanDetail[s.id] = detail; renderTable(); })
             .catch(e => { S.expanded[s.id] = { steps: [], error: e.message }; renderTable(); });
         }
       }
