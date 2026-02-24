@@ -896,25 +896,106 @@ function fmtBins(scan) {
 function fmtBinQty(scan) {
   const c = scan.bin_count || 0;
   const t = scan.bin_tentative_count || 0;
-  if (scan.bin_count == null && t === 0) return '-';
-  if (c === 0 && t === 0) return '0';
+  const editBtn = `<button onclick="event.stopPropagation(); openBinEditPopover(event, '${scan.id}', ${scan.bin_count ?? 'null'}, ${scan.bin_filled_count ?? 'null'}, ${scan.bin_empty_count ?? 'null'})" class="ml-1.5 text-gray-600 hover:text-gray-300 inline-flex items-center align-middle" title="Edit bin count"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 7.125L16.862 4.487"/></svg></button>`;
+  if (scan.bin_count == null && t === 0) return `<span class="inline-flex items-center">-${editBtn}</span>`;
+  if (c === 0 && t === 0) return `<span class="inline-flex items-center">0${editBtn}</span>`;
   let rows = [];
   if (c > 0) {
     const f = scan.bin_filled_count || 0;
     const e = scan.bin_empty_count || 0;
-    rows.push(`<div><span class="text-green-400">${c}</span> <span class="text-gray-500">(${f}F/${e}E)</span></div>`);
+    rows.push(`<div class="inline-flex items-center"><span class="text-green-400">${c}</span> <span class="text-gray-500">(${f}F/${e}E)</span>${editBtn}</div>`);
   }
   if (t > 0) {
     const tf = scan.bin_tentative_filled_count || 0;
     const te = scan.bin_tentative_empty_count || 0;
     rows.push(`<div><span class="text-yellow-400">${t}</span> <span class="text-gray-500">(${tf}F/${te}E)</span></div>`);
   }
+  if (c === 0 && t > 0) rows[0] = rows[0].replace('</div>', editBtn + '</div>');
   return rows.join('');
 }
 
 function fmtBinConf(scan) {
   if (scan.bin_confidence == null) return '-';
   return `${scan.bin_confidence}%`;
+}
+
+// --- Bin count edit popover ---
+function openBinEditPopover(evt, scanId, curCount, curFilled, curEmpty) {
+  evt.stopPropagation();
+  // Close any existing popover
+  const old = document.getElementById('bin-edit-popover');
+  if (old) old.remove();
+
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.id = 'bin-edit-popover';
+  pop.className = 'fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-3 space-y-2';
+  pop.style.top = `${rect.bottom + 6}px`;
+  pop.style.left = `${rect.left - 40}px`;
+
+  const countVal = curCount != null ? curCount : '';
+  const filledVal = curFilled != null ? curFilled : '';
+  const emptyVal = curEmpty != null ? curEmpty : '';
+
+  pop.innerHTML = `
+    <label class="block text-xs text-gray-400">Bin Count</label>
+    <input id="bep-count" type="number" min="0" value="${countVal}" class="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 focus:ring-1 focus:ring-blue-500 outline-none">
+    <label class="block text-xs text-gray-500 mt-1">Filled <span class="text-gray-600">(optional)</span></label>
+    <input id="bep-filled" type="number" min="0" value="${filledVal}" placeholder="-" class="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 focus:ring-1 focus:ring-blue-500 outline-none">
+    <label class="block text-xs text-gray-500 mt-1">Empty <span class="text-gray-600">(optional)</span></label>
+    <input id="bep-empty" type="number" min="0" value="${emptyVal}" placeholder="-" class="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 focus:ring-1 focus:ring-blue-500 outline-none">
+    <div class="flex gap-2 pt-1">
+      <button id="bep-save" class="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium">Save</button>
+      <button id="bep-cancel" class="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300">Cancel</button>
+    </div>`;
+
+  document.body.appendChild(pop);
+
+  // Keep popover within viewport
+  requestAnimationFrame(() => {
+    const popRect = pop.getBoundingClientRect();
+    if (popRect.right > window.innerWidth) pop.style.left = `${window.innerWidth - popRect.width - 8}px`;
+    if (popRect.bottom > window.innerHeight) pop.style.top = `${rect.top - popRect.height - 6}px`;
+  });
+
+  const close = () => pop.remove();
+
+  pop.querySelector('#bep-cancel').addEventListener('click', close);
+
+  pop.querySelector('#bep-save').addEventListener('click', async () => {
+    const countInput = pop.querySelector('#bep-count');
+    const count = parseInt(countInput.value, 10);
+    if (isNaN(count) || count < 0) { countInput.focus(); return; }
+
+    const filledRaw = pop.querySelector('#bep-filled').value.trim();
+    const emptyRaw = pop.querySelector('#bep-empty').value.trim();
+
+    const body = { bin_count: count };
+    if (filledRaw !== '') body.bin_filled_count = parseInt(filledRaw, 10);
+    if (emptyRaw !== '') body.bin_empty_count = parseInt(emptyRaw, 10);
+
+    try {
+      await api('PATCH', `/api/scan/${scanId}/bin-count`, body);
+      close();
+      fetchScans();
+    } catch (e) {
+      toast('Failed to update bin count: ' + e.message, 'error');
+    }
+  });
+
+  // Close on click outside
+  setTimeout(() => {
+    function outsideClick(e) {
+      if (!pop.contains(e.target)) {
+        close();
+        document.removeEventListener('mousedown', outsideClick);
+      }
+    }
+    document.addEventListener('mousedown', outsideClick);
+  }, 0);
+
+  // Focus the count input
+  pop.querySelector('#bep-count').focus();
 }
 
 function fmtSearchLink(scan) {
@@ -1071,9 +1152,9 @@ function renderTable() {
       <td class="px-3 py-2">${statusBadge(scan, scan.id)}</td>
       <td class="px-3 py-2 text-gray-400 text-xs font-mono whitespace-nowrap">${fmtCoords(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBbox(scan)}</td>
-      <td class="px-3 py-2 text-center whitespace-nowrap">${fmtBins(scan)}</td>
-      <td class="px-3 py-2 text-gray-400 whitespace-nowrap text-center">${fmtBinQty(scan)}</td>
-      <td class="px-3 py-2 text-gray-400 whitespace-nowrap text-center">${fmtBinConf(scan)}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${fmtBins(scan)}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBinQty(scan)}</td>
+      <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtBinConf(scan)}</td>
       <td class="px-3 py-2 text-gray-400 whitespace-nowrap">${fmtDate(scan.started_at)}</td>
     </tr>`;
     if (isOpen) {

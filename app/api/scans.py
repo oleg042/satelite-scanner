@@ -246,6 +246,35 @@ async def get_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
     return _scan_to_response(scan)
 
 
+@router.patch("/scan/{scan_id}/bin-count", response_model=ScanListResponse)
+async def update_bin_count(
+    scan_id: UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually update confirmed bin count (and optionally filled/empty)."""
+    scan = await db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    bin_count = payload.get("bin_count")
+    if bin_count is None or not isinstance(bin_count, int) or bin_count < 0:
+        raise HTTPException(status_code=422, detail="bin_count must be a non-negative integer")
+
+    scan.bin_count = bin_count
+    scan.bin_present = bin_count > 0
+
+    # Optional filled/empty — set if provided, else clear
+    bin_filled = payload.get("bin_filled_count")
+    bin_empty = payload.get("bin_empty_count")
+    scan.bin_filled_count = bin_filled if isinstance(bin_filled, int) and bin_filled >= 0 else None
+    scan.bin_empty_count = bin_empty if isinstance(bin_empty, int) and bin_empty >= 0 else None
+
+    await db.commit()
+    await db.refresh(scan)
+    return _scan_to_list_response(scan)
+
+
 def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=None, search=None):
     """Apply shared filter predicates to a scan query."""
     if status:
