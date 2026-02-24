@@ -28,6 +28,7 @@ class BulkImportItem(BaseModel):
 
 
 class BulkImportRequest(BaseModel):
+    import_name: str = Field(..., min_length=1)
     facilities: list[BulkImportItem] = Field(..., min_length=1)
 
 
@@ -96,6 +97,7 @@ class ScanResponse(BaseModel):
     facility_name: str = ""
     facility_address: Optional[str] = None
     domain: Optional[str] = None
+    import_name: Optional[str] = None
     facility_lat: Optional[float] = None
     facility_lng: Optional[float] = None
     status: str
@@ -145,6 +147,7 @@ class ScanListResponse(BaseModel):
     facility_name: str = ""
     facility_address: Optional[str] = None
     domain: Optional[str] = None
+    import_name: Optional[str] = None
     facility_lat: Optional[float] = None
     facility_lng: Optional[float] = None
     status: str

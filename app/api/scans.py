@@ -18,6 +18,7 @@ from starlette.responses import StreamingResponse
 from app.config import settings as app_settings
 from app.database import get_db
 from app.models import Scan, ScanStatus, ScanStep, Screenshot, Setting
+from app.worker import cancel_all, cancel_scan
 from app.schemas import (
     BatchScanRequest,
     BulkImportRequest,
@@ -57,6 +58,7 @@ def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
         facility_name=scan.facility_name,
         facility_address=scan.facility_address,
         domain=scan.domain,
+        import_name=scan.import_name,
         facility_lat=scan.lat,
         facility_lng=scan.lng,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
@@ -106,6 +108,7 @@ def _scan_to_list_response(scan: Scan) -> ScanListResponse:
         facility_name=scan.facility_name,
         facility_address=scan.facility_address,
         domain=scan.domain,
+        import_name=scan.import_name,
         facility_lat=scan.lat,
         facility_lng=scan.lng,
         status=scan.status.value if hasattr(scan.status, "value") else scan.status,
@@ -218,12 +221,15 @@ async def import_facilities(req: BulkImportRequest, db: AsyncSession = Depends(g
         if existing:
             if not existing.domain and item.domain:
                 existing.domain = item.domain
+            if not existing.import_name:
+                existing.import_name = req.import_name
             results.append(ScanSubmitted(scan_id=existing.id, status=existing.status))
         else:
             scan = Scan(
                 facility_name=item.name,
                 facility_address=item.address,
                 domain=item.domain,
+                import_name=req.import_name,
                 lat=None,
                 lng=None,
                 status=ScanStatus.pending,
@@ -275,7 +281,7 @@ async def update_bin_count(
     return _scan_to_list_response(scan)
 
 
-def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=None, search=None):
+def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=None, search=None, import_name=None):
     """Apply shared filter predicates to a scan query."""
     if status:
         q = q.where(Scan.status == status)
@@ -293,6 +299,11 @@ def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=N
         q = q.where(Scan.bin_present == False)
     if search:
         q = q.where(Scan.facility_name.ilike(f"%{search}%") | Scan.facility_address.ilike(f"%{search}%"))
+    if import_name is not None:
+        if import_name == "__null__":
+            q = q.where(Scan.import_name.is_(None))
+        else:
+            q = q.where(Scan.import_name == import_name)
     return q
 
 
@@ -313,6 +324,7 @@ async def list_scans(
     method: str | None = Query(None),
     bins: str | None = Query(None),
     search: str | None = Query(None),
+    import_name: str | None = Query(None),
     sort: str | None = Query(None),
     sort_dir: str = Query("desc"),
     limit: int = Query(50, ge=1, le=200),
@@ -321,7 +333,7 @@ async def list_scans(
 ):
     """List scans with optional filtering and facility name/address search."""
     q = select(Scan).options(noload(Scan.screenshots), noload(Scan.steps))
-    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search, import_name)
 
     sort_expr = _SCAN_SORT_FIELDS.get(sort)
     if sort_expr is not None:
@@ -344,6 +356,7 @@ async def export_scans_csv(
     method: str | None = Query(None),
     bins: str | None = Query(None),
     search: str | None = Query(None),
+    import_name: str | None = Query(None),
     sort: str | None = Query(None),
     sort_dir: str = Query("desc"),
     db: AsyncSession = Depends(get_db),
@@ -353,7 +366,7 @@ async def export_scans_csv(
         select(Scan)
         .options(selectinload(Scan.screenshots), noload(Scan.steps))
     )
-    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search, import_name)
 
     sort_expr = _SCAN_SORT_FIELDS.get(sort)
     if sort_expr is not None:
@@ -373,7 +386,7 @@ async def export_scans_csv(
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "Facility Name", "Address", "Domain", "Google Search URL",
+        "Facility Name", "Address", "Domain", "Import Name", "Google Search URL",
         "Latitude", "Longitude", "Status", "Started At", "Completed At",
         "Overview Screenshot",
         "Bins Found", "Confirmed Bin Count", "Confirmed Filled",
@@ -426,6 +439,7 @@ async def export_scans_csv(
             scan.facility_name or "",
             scan.facility_address or "",
             scan.domain or "",
+            scan.import_name or "",
             google_url,
             scan.lat if scan.lat is not None else "",
             scan.lng if scan.lng is not None else "",
@@ -460,6 +474,7 @@ async def scan_stats(
     method: str | None = Query(None),
     bins: str | None = Query(None),
     search: str | None = Query(None),
+    import_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate stats across all matching scans (no pagination)."""
@@ -468,10 +483,19 @@ async def scan_stats(
         func.count().filter(Scan.status == "completed").label("completed"),
         func.count().filter(Scan.bin_present == True).label("bins_found"),
     ).select_from(Scan)
-    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search, import_name)
 
     row = (await db.execute(q)).one()
     return ScanStatsResponse(total=row.total, completed=row.completed, bins_found=row.bins_found)
+
+
+@router.get("/scans/import-names")
+async def list_import_names(db: AsyncSession = Depends(get_db)):
+    """Return distinct import names for the filter dropdown."""
+    result = await db.execute(
+        select(Scan.import_name).distinct().where(Scan.import_name.isnot(None)).order_by(Scan.import_name)
+    )
+    return result.scalars().all()
 
 
 @router.get("/scans/ids")
@@ -481,11 +505,12 @@ async def scan_ids(
     method: str | None = Query(None),
     bins: str | None = Query(None),
     search: str | None = Query(None),
+    import_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Return all scan IDs matching current filters (no pagination)."""
     q = select(Scan.id).order_by(Scan.id.desc())
-    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search, import_name)
     result = await db.execute(q)
     return {"ids": [str(row[0]) for row in result.all()]}
 
@@ -558,6 +583,33 @@ async def enqueue_all_pending(db: AsyncSession = Depends(get_db)):
         await enqueue_scan(scan.id)
 
     return {"queued": queued}
+
+
+@router.post("/scans/cancel-all", status_code=200)
+async def cancel_all_scans():
+    """Force-stop all running scans and reset queued scans to pending."""
+    result = await cancel_all()
+    return result
+
+
+@router.post("/scan/{scan_id}/cancel", status_code=200)
+async def cancel_single_scan(scan_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Force-stop a single running scan."""
+    was_running = await cancel_scan(scan_id)
+    if was_running:
+        return {"status": "cancelled"}
+
+    # Not actively running — check if it's queued and reset to pending
+    scan = await db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status == ScanStatus.queued:
+        scan.status = ScanStatus.pending
+        scan.error_message = None
+        await db.commit()
+        return {"status": "reset_to_pending"}
+
+    raise HTTPException(status_code=409, detail=f"Scan is not running or queued (status: {scan.status.value})")
 
 
 async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:

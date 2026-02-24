@@ -166,10 +166,10 @@
           class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
           Import
         </button>
-        <button id="refresh-btn" title="Refresh"
-          class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
-          &#8635; Refresh
-        </button>
+        <select id="filter-import-name"
+          class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+          <option value="">All Imports</option>
+        </select>
         <button id="scan-pending-btn"
           class="bg-green-700 hover:bg-green-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">
           Scan All Pending
@@ -262,6 +262,11 @@
         <button onclick="closeImportModal()" class="text-gray-500 hover:text-gray-300 active:scale-95 text-lg">&times;</button>
       </div>
       <div class="px-5 py-4 space-y-3">
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">Import Name <span class="text-red-400">*</span></label>
+          <input id="import-name-input" type="text" placeholder="e.g. Ohio batch Feb 2026"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
+        </div>
         <!-- Tab switcher -->
         <div class="flex gap-1 bg-gray-800 rounded-lg p-0.5">
           <button id="import-tab-paste" onclick="switchImportTab('paste')" class="flex-1 text-sm font-medium rounded-md px-3 py-1.5 transition bg-gray-700 text-white">Paste</button>
@@ -727,6 +732,7 @@ const S = {
   _detectingIds: new Set(),
   allMatchingSelected: false,
 };
+let fetchController = null;
 
 // --- Router ---
 function navigate(page) {
@@ -788,9 +794,10 @@ async function handleLogin(e) {
 }
 
 // --- API helper ---
-async function api(method, path, body) {
+async function api(method, path, body, { signal } = {}) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
+  if (signal) opts.signal = signal;
   const res = await fetch(path, opts);
   if (res.status === 401) {
     document.getElementById('login-overlay').classList.remove('hidden');
@@ -1095,6 +1102,7 @@ function renderTable() {
   const empty = document.getElementById('empty-state');
   const loading = document.getElementById('loading-state');
   loading.classList.add('hidden');
+  document.getElementById('scan-tbody').style.opacity = '';
 
   const sorted = (S.sortField === 'index') ? sortScans(S.scans) : S.scans;
 
@@ -1973,10 +1981,29 @@ function getFilterParams() {
   const status = document.getElementById('filter-status').value;
   const bins = document.getElementById('filter-bins').value;
   const search = document.getElementById('search-input').value.trim();
+  const importName = document.getElementById('filter-import-name').value;
   if (status) params.set('status', status);
   if (bins) params.set('bins', bins);
   if (search) params.set('search', search);
+  if (importName) params.set('import_name', importName);
   return params;
+}
+
+async function loadImportNames() {
+  try {
+    const names = await api('GET', '/api/scans/import-names');
+    const sel = document.getElementById('filter-import-name');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All Imports</option><option value="__null__">No Import Name</option>';
+    names.forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n; opt.textContent = n;
+      sel.appendChild(opt);
+    });
+    sel.value = current;
+  } catch (e) {
+    // silently fail — dropdown just stays at "All Imports"
+  }
 }
 
 function exportCsv() {
@@ -2002,7 +2029,14 @@ async function selectAllMatchingScans() {
 }
 
 // --- Fetch scans ---
-async function fetchScans() {
+async function fetchScans(skipStats = false) {
+  if (fetchController) fetchController.abort();
+  fetchController = new AbortController();
+  const signal = fetchController.signal;
+
+  document.getElementById('loading-state').classList.remove('hidden');
+  document.getElementById('scan-tbody').style.opacity = '0.5';
+
   const params = getFilterParams();
   params.set('limit', S.limit);
   params.set('offset', S.offset);
@@ -2014,14 +2048,17 @@ async function fetchScans() {
   const statsParams = getFilterParams();
 
   try {
-    const [newScans] = await Promise.all([
-      api('GET', `/api/scans?${params}`),
-      api('GET', `/api/scans/stats?${statsParams}`).then(s => {
-        document.getElementById('stat-total').textContent = s.total;
-        document.getElementById('stat-completed').textContent = s.completed;
-        document.getElementById('stat-bins').textContent = s.bins_found;
-      }).catch(() => {}),
-    ]);
+    const promises = [api('GET', `/api/scans?${params}`, null, { signal })];
+    if (!skipStats) {
+      promises.push(
+        api('GET', `/api/scans/stats?${statsParams}`, null, { signal }).then(s => {
+          document.getElementById('stat-total').textContent = s.total;
+          document.getElementById('stat-completed').textContent = s.completed;
+          document.getElementById('stat-bins').textContent = s.bins_found;
+        }).catch(e => { if (e.name !== 'AbortError') throw e; })
+      );
+    }
+    const [newScans] = await Promise.all(promises);
     // Invalidate trace cache for scans whose status or bin detection changed
     const oldMap = Object.fromEntries(S.scans.map(s => [s.id, { status: s.status, bin: s.bin_detection_status }]));
     newScans.forEach(s => {
@@ -2042,9 +2079,17 @@ async function fetchScans() {
     S.scans = newScans;
     const changed = newScans.length !== oldScans.length ||
       newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status || s.bin_count !== oldScans[i]?.bin_count);
-    if (changed) renderTable();
+    if (changed) {
+      renderTable();
+    } else {
+      document.getElementById('loading-state').classList.add('hidden');
+      document.getElementById('scan-tbody').style.opacity = '';
+    }
     managePoll();
   } catch (e) {
+    if (e.name === 'AbortError') return;
+    document.getElementById('loading-state').classList.add('hidden');
+    document.getElementById('scan-tbody').style.opacity = '';
     toast('Failed to load scans: ' + e.message, 'error');
   }
 }
@@ -2496,6 +2541,7 @@ let importItems = [];  // shared items array for both paste & CSV
 
 function openImportModal() {
   document.getElementById('import-modal').classList.remove('hidden');
+  document.getElementById('import-name-input').value = '';
   document.getElementById('import-textarea').value = '';
   document.getElementById('import-csv-input').value = '';
   document.getElementById('csv-upload-label').innerHTML = `
@@ -2504,7 +2550,7 @@ function openImportModal() {
   importItems = [];
   switchImportTab('paste');
   updateImportCount();
-  document.getElementById('import-textarea').focus();
+  document.getElementById('import-name-input').focus();
 }
 
 function closeImportModal() {
@@ -2643,11 +2689,15 @@ function updateImportCount() {
   } else {
     count = parseImportLines(document.getElementById('import-textarea').value).length;
   }
+  const importName = document.getElementById('import-name-input').value.trim();
   document.getElementById('import-count').textContent = `${count} entr${count === 1 ? 'y' : 'ies'}`;
-  document.getElementById('import-submit-btn').disabled = count === 0;
+  document.getElementById('import-submit-btn').disabled = count === 0 || !importName;
 }
 
 async function submitImport() {
+  const importName = document.getElementById('import-name-input').value.trim();
+  if (!importName) { toast('Import name is required', 'error'); return; }
+
   let items;
   if (S._importTab === 'csv') {
     items = importItems;
@@ -2667,12 +2717,13 @@ async function submitImport() {
       btn.textContent = items.length > CHUNK
         ? `Importing ${i}/${items.length}...`
         : 'Importing...';
-      const res = await api('POST', '/api/scan/import', { facilities: chunk });
+      const res = await api('POST', '/api/scan/import', { import_name: importName, facilities: chunk });
       imported += res.length;
     }
     toast(`Imported ${imported} facilit${imported === 1 ? 'y' : 'ies'}`);
     closeImportModal();
     S.offset = 0;
+    loadImportNames();
     fetchScans();
   } catch (e) {
     if (imported > 0) {
@@ -2736,6 +2787,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Import modal
   document.getElementById('import-btn').addEventListener('click', openImportModal);
   document.getElementById('import-textarea').addEventListener('input', updateImportCount);
+  document.getElementById('import-name-input').addEventListener('input', updateImportCount);
   document.getElementById('import-csv-input').addEventListener('change', handleCsvFile);
 
   // Drag-and-drop for CSV upload
@@ -2818,8 +2870,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('scan-pending-btn').addEventListener('click', scanAllPending);
   document.getElementById('export-csv-btn').addEventListener('click', exportCsv);
 
-  // Refresh
-  document.getElementById('refresh-btn').addEventListener('click', fetchScans);
+  // Import name filter
+  document.getElementById('filter-import-name').addEventListener('change', () => { S.offset = 0; resetSelection(); fetchScans(); });
 
   // Pagination
   document.getElementById('prev-btn').addEventListener('click', () => {
@@ -2847,7 +2899,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderTable();
       } else {
         S.offset = 0;
-        fetchScans();
+        fetchScans(true);
       }
     });
   });
@@ -2859,6 +2911,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     handleHash();
     fetchHealth();
     loadSettings();
+    loadImportNames();
   }
 
   // Health polling

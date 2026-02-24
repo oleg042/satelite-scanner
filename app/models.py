@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Text,
     func,
@@ -61,11 +62,17 @@ class ScreenshotType(str, enum.Enum):
 
 class Scan(Base):
     __tablename__ = "scans"
+    __table_args__ = (
+        Index("idx_scans_started_at", "started_at"),
+        Index("idx_scans_facility_name", "facility_name"),
+        Index("idx_scans_status", "status"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     facility_name = Column(Text, nullable=False, default="Unknown")
     facility_address = Column(Text, nullable=True)
     domain = Column(Text, nullable=True)
+    import_name = Column(Text, nullable=True)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
     status = Column(Enum(ScanStatus, name="scan_status"), default=ScanStatus.queued)
