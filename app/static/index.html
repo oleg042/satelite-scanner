@@ -1371,7 +1371,9 @@ function renderDetail(scan) {
       } else {
         let chunkLabel = `<div class="text-xs text-gray-500 mt-1">${esc(typeLabel)} (z${ss.zoom || '?'})${sizeStr}</div>`;
         if (chunkInfo) {
-          chunkLabel += `<div class="text-sm text-gray-300">${esc(typeLabel)} — ${chunkInfo.bins} bin${chunkInfo.bins !== 1 ? 's' : ''}, ${chunkInfo.confidence}% conf</div>`;
+          const confThreshold = parseInt(S.settings.bin_detection_min_confidence) || 50;
+          const confColor = chunkInfo.confidence >= confThreshold ? 'text-green-400' : 'text-gray-300';
+          chunkLabel += `<div class="text-sm text-gray-300">${esc(typeLabel)} — ${chunkInfo.bins} bin${chunkInfo.bins !== 1 ? 's' : ''}, <span class="${confColor}">${chunkInfo.confidence}% conf</span></div>`;
         }
         html += `<div class="text-center cursor-pointer" onclick="openImageModal('${ss.url}', '${esc(label)}', null, null)" title="Click to enlarge">
             <img src="${thumbSrc}" alt="${esc(typeLabel)}" class="rounded border border-gray-700 max-h-48 object-contain cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
