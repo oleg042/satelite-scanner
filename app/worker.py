@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.database import async_session
@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Global scan queue
 scan_queue: asyncio.Queue = asyncio.Queue()
+
+# Track running pipeline tasks: scan_id → asyncio.Task
+running_tasks: dict[UUID, asyncio.Task] = {}
 
 RUNNING_STATUSES = [
     ScanStatus.running_osm,
@@ -127,12 +130,69 @@ async def _worker(worker_id: int):
         scan_id = await scan_queue.get()
         logger.info("[W%d] Processing scan %s...", worker_id, scan_id)
         try:
+            running_tasks[scan_id] = asyncio.current_task()
             async with async_session() as db:
                 await run_pipeline(scan_id, db)
+        except asyncio.CancelledError:
+            logger.info("[W%d] Scan %s was cancelled", worker_id, scan_id)
+            try:
+                async with async_session() as db:
+                    scan = await db.get(Scan, scan_id)
+                    if scan and scan.status not in (ScanStatus.completed, ScanStatus.failed):
+                        scan.status = ScanStatus.failed
+                        scan.error_message = "Cancelled by user"
+                        scan.completed_at = datetime.now(timezone.utc)
+                        await db.commit()
+            except Exception:
+                logger.exception("[W%d] Failed to mark cancelled scan %s", worker_id, scan_id)
         except Exception:
             logger.exception("[W%d] Worker error for scan %s", worker_id, scan_id)
         finally:
+            running_tasks.pop(scan_id, None)
             scan_queue.task_done()
+
+
+async def cancel_scan(scan_id: UUID) -> bool:
+    """Cancel a single running scan. Returns True if it was running."""
+    task = running_tasks.get(scan_id)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
+async def cancel_all() -> dict:
+    """Cancel all running scans and drain the queue back to pending."""
+    cancelled_ids = []
+
+    # 1. Cancel all running tasks
+    for scan_id, task in list(running_tasks.items()):
+        if not task.done():
+            task.cancel()
+            cancelled_ids.append(scan_id)
+
+    # 2. Drain the queue and collect queued scan IDs
+    drained_ids = []
+    while not scan_queue.empty():
+        try:
+            scan_id = scan_queue.get_nowait()
+            drained_ids.append(scan_id)
+            scan_queue.task_done()
+        except asyncio.QueueEmpty:
+            break
+
+    # 3. Reset drained scans to pending in DB
+    if drained_ids:
+        async with async_session() as db:
+            await db.execute(
+                update(Scan)
+                .where(Scan.id.in_(drained_ids))
+                .values(status=ScanStatus.pending, error_message=None)
+            )
+            await db.commit()
+        logger.info("Reset %d queued scans to pending", len(drained_ids))
+
+    return {"cancelled": len(cancelled_ids), "requeued_to_pending": len(drained_ids)}
 
 
 async def worker_pool(n: int | None = None):

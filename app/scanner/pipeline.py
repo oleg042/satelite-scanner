@@ -1183,7 +1183,8 @@ async def run_pipeline(scan_id, db: AsyncSession):
                     completed_at=datetime.now(timezone.utc),
                     decision=f"Bin detection failed: {str(e)[:500]}",
                 )
-                # Don't fail the scan — bin detection is non-critical
+                # AI failures bubble up — scan should fail with a clear error
+                raise
 
         # ── STEP 9: DONE ──────────────────────────────────────────
         step_num += 1
@@ -1211,6 +1212,14 @@ async def run_pipeline(scan_id, db: AsyncSession):
 
         await db.commit()
         logger.info("Scan %s completed — method=%s", scan_id, method)
+
+    except asyncio.CancelledError:
+        logger.info("Pipeline cancelled for scan %s", scan_id)
+        scan.status = ScanStatus.failed
+        scan.error_message = "Cancelled by user"
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        raise
 
     except Exception as e:
         logger.exception("Pipeline failed for scan %s", scan_id)

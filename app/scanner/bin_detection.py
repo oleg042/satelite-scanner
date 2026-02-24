@@ -48,6 +48,7 @@ class BinDetectionResult:
     tentative_bins: int = 0
     tentative_filled_count: int = 0
     tentative_empty_count: int = 0
+    fatal_error: str | None = None
 
 
 def calculate_chunk_grid(
@@ -336,6 +337,9 @@ async def run_bin_detection(
     raw_responses = []
     chunk_results = []
 
+    # Track first chunk error (used as fatal_error when all chunks fail)
+    first_chunk_error = None
+
     for (chunk, _b64), result in zip(chunk_data, results):
         total_prompt_tokens += result.get("prompt_tokens", 0)
         total_completion_tokens += result.get("completion_tokens", 0)
@@ -346,6 +350,8 @@ async def run_bin_detection(
 
         if result["status"] == "failed":
             chunks_failed += 1
+            if not first_chunk_error:
+                first_chunk_error = result.get("error", "unknown error")
             chunk_results.append({
                 "col": chunk["col"], "row": chunk["row"],
                 "status": "failed", "error": result.get("error"),
@@ -448,6 +454,7 @@ async def run_bin_detection(
         tentative_bins=tentative_bins_count,
         tentative_filled_count=tentative_filled,
         tentative_empty_count=tentative_empty,
+        fatal_error=first_chunk_error if chunks_failed > 0 and chunks_failed >= len(chunks) else None,
     )
 
 
@@ -566,6 +573,9 @@ async def execute_bin_detection(
         scan.bin_detection_status = "failed"
     else:
         scan.bin_detection_status = "completed"
+
+    if bin_result.fatal_error:
+        raise RuntimeError(f"Bin detection fatal error: {bin_result.fatal_error}")
 
     # Save chunk images where bins were found (only if confidence meets threshold)
     if bin_result.bin_present:
