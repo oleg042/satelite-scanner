@@ -334,7 +334,10 @@ async def export_scans_csv(
     result = await db.execute(q)
     scans = result.scalars().unique().all()
 
-    base = str(request.base_url).rstrip("/")
+    # Build proxy-aware base URL for absolute screenshot links
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", str(request.url.netloc))
+    base = f"{proto}://{host}"
 
     buf = io.StringIO()
     writer = csv.writer(buf)
