@@ -2029,13 +2029,15 @@ async function selectAllMatchingScans() {
 }
 
 // --- Fetch scans ---
-async function fetchScans(skipStats = false) {
+async function fetchScans(skipStats = false, { silent = false } = {}) {
   if (fetchController) fetchController.abort();
   fetchController = new AbortController();
   const signal = fetchController.signal;
 
-  document.getElementById('loading-state').classList.remove('hidden');
-  document.getElementById('scan-tbody').style.opacity = '0.5';
+  if (!silent) {
+    document.getElementById('loading-state').classList.remove('hidden');
+    document.getElementById('scan-tbody').style.opacity = '0.5';
+  }
 
   const params = getFilterParams();
   params.set('limit', S.limit);
@@ -2070,17 +2072,37 @@ async function fetchScans(skipStats = false) {
           Promise.all([
             api('GET', `/api/scan/${s.id}/steps`),
             api('GET', `/api/scan/${s.id}`),
-          ]).then(([trace, detail]) => { S.expanded[s.id] = trace; S.scanDetail[s.id] = detail; renderTable(); })
-            .catch(e => { S.expanded[s.id] = { steps: [], error: e.message }; renderTable(); });
+          ]).then(([trace, detail]) => {
+            S.expanded[s.id] = trace; S.scanDetail[s.id] = detail;
+            if (silent) {
+              // Patch just the detail row instead of rebuilding everything
+              const tbody = document.getElementById('scan-tbody');
+              const mainRow = tbody.querySelector(`tr[data-id="${s.id}"]`);
+              const detailRow = mainRow && mainRow.nextElementSibling;
+              if (detailRow && !detailRow.dataset.id) {
+                detailRow.querySelector('td').innerHTML = renderDetail(s);
+              }
+            } else {
+              renderTable();
+            }
+          }).catch(e => { S.expanded[s.id] = { steps: [], error: e.message }; renderTable(); });
         }
       }
     });
     const oldScans = S.scans;
     S.scans = newScans;
-    const changed = newScans.length !== oldScans.length ||
-      newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status || s.bin_count !== oldScans[i]?.bin_count);
-    if (changed) {
+    const structuralChange = newScans.length !== oldScans.length ||
+      newScans.some((s, i) => s.id !== oldScans[i]?.id);
+    const dataChange = !structuralChange &&
+      newScans.some((s, i) => s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status || s.bin_count !== oldScans[i]?.bin_count);
+    if (structuralChange) {
       renderTable();
+    } else if (dataChange) {
+      if (silent) {
+        patchTableRows(oldScans, newScans);
+      } else {
+        renderTable();
+      }
     } else {
       document.getElementById('loading-state').classList.add('hidden');
       document.getElementById('scan-tbody').style.opacity = '';
@@ -2094,13 +2116,35 @@ async function fetchScans(skipStats = false) {
   }
 }
 
+// --- Patch table rows in-place (no full rebuild) ---
+function patchTableRows(oldScans, newScans) {
+  const tbody = document.getElementById('scan-tbody');
+  newScans.forEach((scan, i) => {
+    const old = oldScans[i];
+    if (!old) return;
+    const needsPatch = old.status !== scan.status ||
+      old.bin_detection_status !== scan.bin_detection_status ||
+      old.bin_count !== scan.bin_count ||
+      old.bin_tentative_count !== scan.bin_tentative_count;
+    if (!needsPatch) return;
+    const row = tbody.querySelector(`tr[data-id="${scan.id}"]`);
+    if (!row) return;
+    const cells = row.children;
+    // col 4 = status badge, col 7 = bins, col 8 = bin qty, col 9 = bin confidence
+    if (cells[4]) cells[4].innerHTML = statusBadge(scan, scan.id);
+    if (cells[7]) cells[7].innerHTML = fmtBins(scan);
+    if (cells[8]) cells[8].innerHTML = fmtBinQty(scan);
+    if (cells[9]) cells[9].innerHTML = fmtBinConf(scan);
+  });
+}
+
 // --- Polling ---
 const TERMINAL = new Set(['completed', 'failed', 'skipped', 'pending']);
 
 function managePoll() {
   const hasActive = S.scans.some(s => !TERMINAL.has(s.status)) || S._detectingIds.size > 0;
   if (hasActive && !S.pollTimer) {
-    S.pollTimer = setInterval(fetchScans, 5000);
+    S.pollTimer = setInterval(() => fetchScans(false, { silent: true }), 5000);
   } else if (!hasActive && S.pollTimer) {
     clearInterval(S.pollTimer);
     S.pollTimer = null;
