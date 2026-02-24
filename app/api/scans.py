@@ -287,6 +287,8 @@ def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=N
         q = q.where(Scan.bin_present == True)
     elif bins == "tentative":
         q = q.where(Scan.bin_tentative_count > 0)
+    elif bins == "tentative_only":
+        q = q.where(Scan.bin_tentative_count > 0, Scan.bin_count == 0)
     elif bins == "false":
         q = q.where(Scan.bin_present == False)
     if search:
