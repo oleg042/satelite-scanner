@@ -1876,8 +1876,17 @@ async function fetchScans() {
     params.set('sort_dir', S.sortDir);
   }
 
+  const statsParams = getFilterParams();
+
   try {
-    const newScans = await api('GET', `/api/scans?${params}`);
+    const [newScans] = await Promise.all([
+      api('GET', `/api/scans?${params}`),
+      api('GET', `/api/scans/stats?${statsParams}`).then(s => {
+        document.getElementById('stat-total').textContent = s.total;
+        document.getElementById('stat-completed').textContent = s.completed;
+        document.getElementById('stat-bins').textContent = s.bins_found;
+      }).catch(() => {}),
+    ]);
     // Invalidate trace cache for scans whose status or bin detection changed
     const oldMap = Object.fromEntries(S.scans.map(s => [s.id, { status: s.status, bin: s.bin_detection_status }]));
     newScans.forEach(s => {
@@ -1897,20 +1906,9 @@ async function fetchScans() {
       newScans.some((s, i) => s.id !== oldScans[i]?.id || s.status !== oldScans[i]?.status || s.bin_detection_status !== oldScans[i]?.bin_detection_status || s.bin_count !== oldScans[i]?.bin_count);
     if (changed) renderTable();
     managePoll();
-    fetchStats();
   } catch (e) {
     toast('Failed to load scans: ' + e.message, 'error');
   }
-}
-
-async function fetchStats() {
-  const params = getFilterParams();
-  try {
-    const s = await api('GET', `/api/scans/stats?${params}`);
-    document.getElementById('stat-total').textContent = s.total;
-    document.getElementById('stat-completed').textContent = s.completed;
-    document.getElementById('stat-bins').textContent = s.bins_found;
-  } catch {}
 }
 
 // --- Polling ---

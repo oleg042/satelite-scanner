@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from app.config import settings as app_settings
 from app.database import get_db
@@ -15,6 +16,7 @@ from app.models import Scan, ScanStatus, ScanStep, Screenshot, Setting
 from app.schemas import (
     BatchScanRequest,
     BulkImportRequest,
+    ScanListResponse,
     ScanRequest,
     ScanResponse,
     ScanStatsResponse,
@@ -89,6 +91,54 @@ def _scan_to_response(scan: Scan, base_url: str = "") -> ScanResponse:
         ai_duration_ms=scan.ai_duration_ms,
         tile_duration_ms=scan.tile_duration_ms,
         screenshots=screenshots,
+    )
+
+
+def _scan_to_list_response(scan: Scan) -> ScanListResponse:
+    """Convert Scan ORM to lightweight ScanListResponse (no screenshots)."""
+    return ScanListResponse(
+        id=scan.id,
+        facility_name=scan.facility_name,
+        facility_address=scan.facility_address,
+        domain=scan.domain,
+        facility_lat=scan.lat,
+        facility_lng=scan.lng,
+        status=scan.status.value if hasattr(scan.status, "value") else scan.status,
+        method=scan.method.value if scan.method and hasattr(scan.method, "value") else scan.method,
+        zoom=scan.zoom,
+        buffer_m=scan.buffer_m,
+        osm_building_count=scan.osm_building_count,
+        bbox_min_lat=scan.bbox_min_lat,
+        bbox_min_lng=scan.bbox_min_lng,
+        bbox_max_lat=scan.bbox_max_lat,
+        bbox_max_lng=scan.bbox_max_lng,
+        bbox_width_m=scan.bbox_width_m,
+        bbox_height_m=scan.bbox_height_m,
+        ai_confidence=scan.ai_confidence,
+        ai_facility_type=scan.ai_facility_type,
+        ai_building_count=scan.ai_building_count,
+        ai_notes=scan.ai_notes,
+        ai_validated=scan.ai_validated,
+        tile_count=scan.tile_count,
+        tiles_downloaded=scan.tiles_downloaded,
+        image_width=scan.image_width,
+        image_height=scan.image_height,
+        bin_present=scan.bin_present,
+        bin_count=scan.bin_count,
+        bin_filled_count=scan.bin_filled_count,
+        bin_empty_count=scan.bin_empty_count,
+        bin_confidence=scan.bin_confidence,
+        bin_detection_status=scan.bin_detection_status,
+        bin_tentative_count=scan.bin_tentative_count,
+        bin_tentative_filled_count=scan.bin_tentative_filled_count,
+        bin_tentative_empty_count=scan.bin_tentative_empty_count,
+        error_message=scan.error_message,
+        skip_reason=scan.skip_reason,
+        started_at=scan.started_at,
+        completed_at=scan.completed_at,
+        osm_duration_ms=scan.osm_duration_ms,
+        ai_duration_ms=scan.ai_duration_ms,
+        tile_duration_ms=scan.tile_duration_ms,
     )
 
 
@@ -217,7 +267,7 @@ _SCAN_SORT_FIELDS = {
 }
 
 
-@router.get("/scans", response_model=list[ScanResponse])
+@router.get("/scans", response_model=list[ScanListResponse])
 async def list_scans(
     status: str | None = Query(None),
     exclude_status: str | None = Query(None),
@@ -231,7 +281,7 @@ async def list_scans(
     db: AsyncSession = Depends(get_db),
 ):
     """List scans with optional filtering and facility name/address search."""
-    q = select(Scan)
+    q = select(Scan).options(noload(Scan.screenshots), noload(Scan.steps))
     q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
 
     sort_expr = _SCAN_SORT_FIELDS.get(sort)
@@ -244,7 +294,7 @@ async def list_scans(
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
     scans = result.scalars().all()
-    return [_scan_to_response(scan) for scan in scans]
+    return [_scan_to_list_response(scan) for scan in scans]
 
 
 @router.get("/scans/stats", response_model=ScanStatsResponse)

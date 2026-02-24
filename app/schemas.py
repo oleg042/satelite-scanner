@@ -139,6 +139,54 @@ class ScanResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScanListResponse(BaseModel):
+    """Lightweight scan response for list endpoints (no screenshots)."""
+    id: UUID
+    facility_name: str = ""
+    facility_address: Optional[str] = None
+    domain: Optional[str] = None
+    facility_lat: Optional[float] = None
+    facility_lng: Optional[float] = None
+    status: str
+    method: Optional[str] = None
+    zoom: Optional[int] = None
+    buffer_m: Optional[int] = None
+    osm_building_count: Optional[int] = None
+    bbox_min_lat: Optional[float] = None
+    bbox_min_lng: Optional[float] = None
+    bbox_max_lat: Optional[float] = None
+    bbox_max_lng: Optional[float] = None
+    bbox_width_m: Optional[float] = None
+    bbox_height_m: Optional[float] = None
+    ai_confidence: Optional[str] = None
+    ai_facility_type: Optional[str] = None
+    ai_building_count: Optional[int] = None
+    ai_notes: Optional[str] = None
+    ai_validated: Optional[bool] = None
+    tile_count: Optional[int] = None
+    tiles_downloaded: Optional[int] = None
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
+    bin_present: Optional[bool] = None
+    bin_count: Optional[int] = None
+    bin_filled_count: Optional[int] = None
+    bin_empty_count: Optional[int] = None
+    bin_confidence: Optional[int] = None
+    bin_detection_status: Optional[str] = None
+    bin_tentative_count: Optional[int] = None
+    bin_tentative_filled_count: Optional[int] = None
+    bin_tentative_empty_count: Optional[int] = None
+    error_message: Optional[str] = None
+    skip_reason: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    osm_duration_ms: Optional[int] = None
+    ai_duration_ms: Optional[int] = None
+    tile_duration_ms: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ScanStatsResponse(BaseModel):
     total: int = 0
     completed: int = 0
