@@ -915,7 +915,7 @@ function fmtBinQty(scan) {
     const te = scan.bin_tentative_empty_count || 0;
     rows.push(`<div><span class="text-yellow-400">${t}</span> <span class="text-gray-500">(${tf}F/${te}E)</span></div>`);
   }
-  if (c === 0 && t > 0) rows[0] = rows[0].replace('</div>', editBtnSubtle + '</div>');
+  if (c === 0 && t > 0) rows[0] = rows[0].replace('</div>', editBtn + '</div>');
   return rows.join('');
 }
 
