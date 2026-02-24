@@ -713,7 +713,7 @@ const S = {
   resolved: null, // { lat, lng, display_name, source }
   settings: {},
   groupByCompany: false,
-  collapsedGroups: new Set(),
+  expandedGroups: new Set(),
   _detectingIds: new Set(),
   allMatchingSelected: false,
 };
@@ -1029,7 +1029,7 @@ function renderTable() {
       const groupKey = (scan.facility_name || '-').toLowerCase();
       if (groupKey !== currentGroup) {
         currentGroup = groupKey;
-        const collapsed = S.collapsedGroups.has(groupKey);
+        const collapsed = !S.expandedGroups.has(groupKey);
         const chevron = collapsed ? '\u25B6' : '\u25BC';
         // Count facilities in this group
         const groupScans = displayScans.filter(s => (s.facility_name || '-').toLowerCase() === groupKey);
@@ -1053,7 +1053,7 @@ function renderTable() {
         </tr>`;
       }
       // Skip facility rows if group is collapsed
-      if (S.collapsedGroups.has(groupKey)) return;
+      if (!S.expandedGroups.has(groupKey)) return;
     }
 
     const rowNum = S.offset + i + 1;
@@ -1121,8 +1121,8 @@ function renderTable() {
   tbody.querySelectorAll('tr[data-group]').forEach(row => {
     row.addEventListener('click', () => {
       const groupKey = row.dataset.group;
-      if (S.collapsedGroups.has(groupKey)) S.collapsedGroups.delete(groupKey);
-      else S.collapsedGroups.add(groupKey);
+      if (S.expandedGroups.has(groupKey)) S.expandedGroups.delete(groupKey);
+      else S.expandedGroups.add(groupKey);
       renderTable();
     });
   });
@@ -2615,8 +2615,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('group-label-grouped').classList.toggle('text-gray-500', !S.groupByCompany);
     if (S.groupByCompany) {
       // Collapse all groups by default when switching to grouped
-      const allGroups = new Set(S.scans.map(s => (s.facility_name || '-').toLowerCase()));
-      S.collapsedGroups = allGroups;
+      S.expandedGroups.clear();
     }
     renderTable();
   });
