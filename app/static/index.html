@@ -334,16 +334,22 @@
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-400">API Configuration</h3>
           <div>
-            <label class="block text-sm text-gray-300 mb-1.5">OpenAI API Key</label>
+            <label class="block text-sm text-gray-300 mb-1.5"><span class="text-gray-500 font-medium">OpenAI</span> API Key</label>
             <input id="set-api-key" type="password" placeholder="sk-..."
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none max-w-md">
             <p class="text-xs text-gray-600 mt-1">Leave blank to keep current key. Current: <span id="set-api-key-mask" class="text-gray-500">not set</span></p>
           </div>
           <div>
-            <label class="block text-sm text-gray-300 mb-1.5">Serper API Key</label>
+            <label class="block text-sm text-gray-300 mb-1.5"><span class="text-gray-500 font-medium">Serper</span> API Key</label>
             <input id="set-serper-key" type="password" placeholder="serper-..."
               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:ring-1 focus:ring-blue-500 outline-none max-w-md">
             <p class="text-xs text-gray-600 mt-1">Leave blank to keep current key. Current: <span id="set-serper-key-mask" class="text-gray-500">not set</span></p>
+          </div>
+          <div>
+            <button type="submit"
+              class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium rounded px-4 py-1.5 text-sm transition">
+              Save
+            </button>
           </div>
         </div>
 
