@@ -1532,7 +1532,7 @@ function renderDetail(scan) {
       const bds = scan.bin_detection_status;
       const bdsColor = bds === 'completed' ? 'text-green-400' : bds === 'partial' ? 'text-yellow-400' : bds === 'failed' ? 'text-red-400' : 'text-gray-400';
 
-      html += '<details class="text-xs" open>';
+      html += '<details class="text-xs">';
       html += '<summary class="text-xs font-semibold uppercase tracking-wide text-gray-400 cursor-pointer hover:text-gray-300">Bin Detection Trace</summary>';
       html += '<div class="space-y-2 mt-2">';
 
