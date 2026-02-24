@@ -374,7 +374,8 @@ async def export_scans_csv(
     writer = csv.writer(buf)
     writer.writerow([
         "Facility Name", "Address", "Domain", "Google Search URL",
-        "Latitude", "Longitude", "Status", "Overview Screenshot",
+        "Latitude", "Longitude", "Status", "Started At", "Completed At",
+        "Overview Screenshot",
         "Bins Found", "Confirmed Bin Count", "Confirmed Filled",
         "Confirmed Empty", "Bin Confidence %", "Tentative Bin Count",
         "Tentative Filled", "Tentative Empty",
@@ -429,6 +430,8 @@ async def export_scans_csv(
             scan.lat if scan.lat is not None else "",
             scan.lng if scan.lng is not None else "",
             scan.status.value if scan.status else "",
+            scan.started_at.strftime("%Y-%m-%d %H:%M") if scan.started_at else "",
+            scan.completed_at.strftime("%Y-%m-%d %H:%M") if scan.completed_at else "",
             overview_url,
             bins_found,
             scan.bin_count if scan.bin_count is not None else "",
