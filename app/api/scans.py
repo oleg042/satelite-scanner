@@ -1,14 +1,19 @@
 """Scan endpoints — submit, status, list, delete, bin detection."""
 
+import csv
+import io
 import json
 import logging
 import os
+from urllib.parse import quote_plus
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import asc, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import noload
+from sqlalchemy.orm import noload, selectinload
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
 
 from app.config import settings as app_settings
 from app.database import get_db
@@ -251,6 +256,8 @@ def _apply_scan_filters(q, status=None, exclude_status=None, method=None, bins=N
         q = q.where(Scan.method == method)
     if bins == "true":
         q = q.where(Scan.bin_present == True)
+    elif bins == "tentative":
+        q = q.where(Scan.bin_tentative_count > 0)
     elif bins == "false":
         q = q.where(Scan.bin_present == False)
     if search:
@@ -263,6 +270,7 @@ _SCAN_SORT_FIELDS = {
     "status": Scan.status,
     "started_at": Scan.started_at,
     "bbox": Scan.bbox_width_m * Scan.bbox_height_m,
+    "qty": Scan.bin_count,
     "id": Scan.id,
 }
 
@@ -295,6 +303,117 @@ async def list_scans(
     result = await db.execute(q)
     scans = result.scalars().all()
     return [_scan_to_list_response(scan) for scan in scans]
+
+
+@router.get("/scans/export-csv")
+async def export_scans_csv(
+    request: Request,
+    status: str | None = Query(None),
+    exclude_status: str | None = Query(None),
+    method: str | None = Query(None),
+    bins: str | None = Query(None),
+    search: str | None = Query(None),
+    sort: str | None = Query(None),
+    sort_dir: str = Query("desc"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export all matching scans as a CSV file with screenshot URLs."""
+    q = (
+        select(Scan)
+        .options(selectinload(Scan.screenshots), noload(Scan.steps))
+    )
+    q = _apply_scan_filters(q, status, exclude_status, method, bins, search)
+
+    sort_expr = _SCAN_SORT_FIELDS.get(sort)
+    if sort_expr is not None:
+        direction = asc if sort_dir == "asc" else desc
+        q = q.order_by(direction(sort_expr).nullslast())
+    else:
+        q = q.order_by(Scan.id.desc())
+
+    result = await db.execute(q)
+    scans = result.scalars().unique().all()
+
+    base = str(request.base_url).rstrip("/")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Facility Name", "Address", "Domain", "Google Search URL",
+        "Latitude", "Longitude", "Status", "Overview Screenshot",
+        "Bins Found", "Confirmed Bin Count", "Confirmed Filled",
+        "Confirmed Empty", "Bin Confidence %", "Tentative Bin Count",
+        "Tentative Filled", "Tentative Empty",
+        "Confident Bin Screenshots", "Tentative Bin Screenshots",
+    ])
+
+    for scan in scans:
+        # Google search URL
+        search_parts = " ".join(
+            p for p in [scan.facility_name, scan.facility_address] if p
+        )
+        google_url = (
+            f"https://www.google.com/search?q={quote_plus(search_parts)}"
+            if search_parts else ""
+        )
+
+        # Overview screenshot — prefer "overview", fall back to "ai_overview"
+        overview_url = ""
+        for preferred in ("overview", "ai_overview"):
+            for ss in scan.screenshots:
+                if ss.type.value == preferred:
+                    overview_url = f"{base}/api/screenshots/{ss.id}"
+                    break
+            if overview_url:
+                break
+
+        # Bin chunk screenshots split into confident vs tentative
+        bin_chunks = [
+            f"{base}/api/screenshots/{ss.id}"
+            for ss in scan.screenshots
+            if ss.type.value == "bin_chunk"
+        ]
+        confident_urls = ""
+        tentative_urls = ""
+        if (scan.bin_count or 0) > 0:
+            confident_urls = "\n".join(bin_chunks)
+        elif (scan.bin_tentative_count or 0) > 0:
+            tentative_urls = "\n".join(bin_chunks)
+
+        # Bins found display value
+        bins_found = ""
+        if scan.bin_present is True:
+            bins_found = "Yes"
+        elif scan.bin_present is False:
+            bins_found = "No"
+
+        writer.writerow([
+            scan.facility_name or "",
+            scan.facility_address or "",
+            scan.domain or "",
+            google_url,
+            scan.lat if scan.lat is not None else "",
+            scan.lng if scan.lng is not None else "",
+            scan.status.value if scan.status else "",
+            overview_url,
+            bins_found,
+            scan.bin_count if scan.bin_count is not None else "",
+            scan.bin_filled_count if scan.bin_filled_count is not None else "",
+            scan.bin_empty_count if scan.bin_empty_count is not None else "",
+            scan.bin_confidence if scan.bin_confidence is not None else "",
+            scan.bin_tentative_count if scan.bin_tentative_count is not None else "",
+            scan.bin_tentative_filled_count if scan.bin_tentative_filled_count is not None else "",
+            scan.bin_tentative_empty_count if scan.bin_tentative_empty_count is not None else "",
+            confident_urls,
+            tentative_urls,
+        ])
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="scans_export.csv"'},
+    )
 
 
 @router.get("/scans/stats", response_model=ScanStatsResponse)

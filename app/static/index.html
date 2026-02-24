@@ -146,6 +146,7 @@
           class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none">
           <option value="">All Bins</option>
           <option value="true">Bins Found</option>
+          <option value="tentative">Tentative Bins</option>
           <option value="false">No Bins</option>
         </select>
         <label class="inline-flex items-center gap-2 cursor-pointer select-none" title="Toggle company grouping">
@@ -168,6 +169,10 @@
         <button id="scan-pending-btn"
           class="bg-green-700 hover:bg-green-600 active:scale-95 text-white font-medium rounded px-3 py-1.5 text-sm transition">
           Scan All Pending
+        </button>
+        <button id="export-csv-btn" title="Export filtered scans as CSV"
+          class="bg-gray-800 border border-gray-700 hover:bg-gray-700 active:scale-95 rounded px-3 py-1.5 text-sm transition">
+          &#x2913; Export CSV
         </button>
         <div id="scan-stats" class="ml-auto text-right text-sm leading-snug">
           <div><span class="text-gray-500">Facilities</span> <span id="stat-total" class="text-gray-300 font-medium">0</span> <span class="text-gray-600 mx-1">&middot;</span> <span class="text-gray-500">Completed</span> <span id="stat-completed" class="text-gray-300 font-medium">0</span></div>
@@ -213,7 +218,7 @@
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Coords</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="bbox">BBox</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Bins</th>
-              <th class="px-3 py-2.5 font-medium whitespace-nowrap">Qty</th>
+              <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="qty">Qty</th>
               <th class="px-3 py-2.5 font-medium whitespace-nowrap">Conf</th>
               <th class="px-3 py-2.5 font-medium cursor-pointer select-none hover:text-gray-200 whitespace-nowrap" data-sort="started_at">Date</th>
             </tr>
@@ -953,6 +958,7 @@ function getSortValue(scan, field, idx) {
     case 'method': return scan.method || '';
     case 'ai_facility_type': return (scan.ai_facility_type || '').toLowerCase();
     case 'bbox': return (scan.bbox_width_m || 0) * (scan.bbox_height_m || 0);
+    case 'qty': return scan.bin_count || 0;
     case 'started_at': return scan.started_at ? new Date(scan.started_at).getTime() : 0;
     default: return '';
   }
@@ -1860,6 +1866,15 @@ function getFilterParams() {
   return params;
 }
 
+function exportCsv() {
+  const params = getFilterParams();
+  if (S.sortField && S.sortField !== 'index') {
+    params.set('sort', S.sortField);
+    params.set('sort_dir', S.sortDir);
+  }
+  window.location = '/api/scans/export-csv?' + params.toString();
+}
+
 async function selectAllMatchingScans() {
   try {
     const res = await api('GET', `/api/scans/ids?${getFilterParams()}`);
@@ -2689,6 +2704,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('delete-btn').addEventListener('click', deleteSelected);
   document.getElementById('scan-selected-btn').addEventListener('click', scanSelected);
   document.getElementById('scan-pending-btn').addEventListener('click', scanAllPending);
+  document.getElementById('export-csv-btn').addEventListener('click', exportCsv);
 
   // Refresh
   document.getElementById('refresh-btn').addEventListener('click', fetchScans);
@@ -2711,7 +2727,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
         S.sortField = field;
-        S.sortDir = 'asc';
+        S.sortDir = field === 'qty' ? 'desc' : 'asc';
       }
       document.querySelectorAll('th[data-sort]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
       th.classList.add(S.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
