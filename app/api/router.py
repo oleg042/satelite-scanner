@@ -351,6 +351,38 @@ async def cleanup_storage():
     }
 
 
+# --- Debug: download volume as zip (TEMPORARY) ---
+
+@api_router.get("/debug/download-volume")
+async def download_volume():
+    """Zip and download the entire /data volume. REMOVE after debugging."""
+    import tempfile
+    import zipfile
+    from fastapi.responses import FileResponse
+
+    volume = app_settings.volume_path
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.close()
+
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, dirnames, filenames in os.walk(volume):
+            # Skip lost+found
+            dirnames[:] = [d for d in dirnames if d != "lost+found"]
+            for fname in filenames:
+                abs_path = os.path.join(dirpath, fname)
+                arc_name = os.path.relpath(abs_path, volume)
+                try:
+                    zf.write(abs_path, arc_name)
+                except OSError:
+                    pass
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/zip",
+        filename="satellite-scanner-volume.zip",
+    )
+
+
 # --- Debug: volume inspection (TEMPORARY) ---
 
 @api_router.get("/debug/volume")
