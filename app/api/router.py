@@ -300,6 +300,73 @@ async def cleanup_storage():
     }
 
 
+# --- Debug: volume inspection (TEMPORARY) ---
+
+@api_router.get("/debug/volume")
+async def debug_volume():
+    """Temporary endpoint to inspect what's on the volume. REMOVE after debugging."""
+    import subprocess
+    volume = app_settings.volume_path
+    result = {}
+
+    # 1. What does volume_path resolve to?
+    result["volume_path_setting"] = volume
+    result["volume_path_resolved"] = os.path.realpath(volume)
+    result["volume_path_exists"] = os.path.isdir(volume)
+
+    # 2. List top-level contents of /data (the actual mount)
+    for check_path in [volume, "/data"]:
+        key = f"ls_{check_path.replace('/', '_').strip('_')}"
+        if os.path.isdir(check_path):
+            entries = []
+            for entry in sorted(os.listdir(check_path)):
+                full = os.path.join(check_path, entry)
+                if os.path.isdir(full):
+                    entries.append({"name": entry, "type": "dir"})
+                else:
+                    entries.append({"name": entry, "type": "file", "size_bytes": os.path.getsize(full)})
+            result[key] = entries
+        else:
+            result[key] = "NOT FOUND"
+
+    # 3. du -sh for each top-level dir under volume_path
+    try:
+        du = subprocess.run(
+            ["du", "-sh", "--max-depth=1", volume],
+            capture_output=True, text=True, timeout=30
+        )
+        result["du_volume_path"] = du.stdout.strip().split("\n") if du.stdout else du.stderr
+    except Exception as e:
+        result["du_volume_path"] = str(e)
+
+    # 4. du -sh for /data specifically (in case it differs)
+    if volume != "/data" and os.path.isdir("/data"):
+        try:
+            du = subprocess.run(
+                ["du", "-sh", "--max-depth=1", "/data"],
+                capture_output=True, text=True, timeout=30
+            )
+            result["du_data"] = du.stdout.strip().split("\n") if du.stdout else du.stderr
+        except Exception as e:
+            result["du_data"] = str(e)
+
+    # 5. df for disk usage
+    try:
+        df = subprocess.run(
+            ["df", "-h"],
+            capture_output=True, text=True, timeout=10
+        )
+        result["df"] = df.stdout.strip().split("\n") if df.stdout else df.stderr
+    except Exception as e:
+        result["df"] = str(e)
+
+    # 6. Check RAILWAY env vars
+    result["env_VOLUME_PATH"] = os.environ.get("VOLUME_PATH", "NOT SET")
+    result["env_RAILWAY_VOLUME_MOUNT_PATH"] = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "NOT SET")
+
+    return result
+
+
 # --- Railway restart ---
 
 @api_router.post("/restart")
