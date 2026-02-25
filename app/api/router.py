@@ -227,6 +227,32 @@ async def get_storage():
     other_bytes = total_bytes - tile_bytes - ss_bytes
 
     to_mb = lambda b: round(b / (1024 * 1024), 1)
+
+    # --- Debug info (TEMPORARY - remove after investigating volume issue) ---
+    import subprocess
+    debug = {}
+    debug["volume_path_setting"] = volume
+    debug["volume_path_resolved"] = os.path.realpath(volume)
+    debug["env_VOLUME_PATH"] = os.environ.get("VOLUME_PATH", "NOT SET")
+    debug["env_RAILWAY_VOLUME_MOUNT_PATH"] = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "NOT SET")
+    try:
+        du = subprocess.run(["du", "-sh", "-d", "1", volume], capture_output=True, text=True, timeout=30)
+        debug["du"] = du.stdout.strip().split("\n") if du.stdout else du.stderr.strip()
+    except Exception as e:
+        debug["du"] = str(e)
+    try:
+        df = subprocess.run(["df", "-h"], capture_output=True, text=True, timeout=10)
+        debug["df"] = df.stdout.strip().split("\n") if df.stdout else df.stderr.strip()
+    except Exception as e:
+        debug["df"] = str(e)
+    # List top-level dirs in both volume_path and /data
+    for p in set([volume, "/data"]):
+        k = f"ls_{p.replace('/','_').strip('_')}"
+        if os.path.isdir(p):
+            debug[k] = sorted(os.listdir(p))
+        else:
+            debug[k] = "NOT FOUND"
+
     return {
         "total_mb": to_mb(total_bytes),
         "tile_cache_mb": to_mb(tile_bytes),
@@ -234,6 +260,7 @@ async def get_storage():
         "screenshots_mb": to_mb(ss_bytes),
         "screenshots_files": ss_files,
         "other_mb": to_mb(other_bytes),
+        "debug": debug,
     }
 
 
