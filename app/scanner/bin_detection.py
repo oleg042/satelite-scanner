@@ -594,6 +594,10 @@ async def execute_bin_detection(
                        chunk_desc["px_x"] + chunk_desc["px_w"],
                        chunk_desc["px_y"] + chunk_desc["px_h"])
                 chunk_crop = final_img.crop(box)
+                # Resize to 75% to save disk space
+                new_w = int(chunk_crop.width * 0.75)
+                new_h = int(chunk_crop.height * 0.75)
+                chunk_crop = chunk_crop.resize((new_w, new_h), Image.LANCZOS)
                 suffix = f"bin_chunk_{cr['col']}_{cr['row']}"
                 rel_path_c, filename_c, abs_path_c = save_image(
                     chunk_crop, scan.facility_name, suffix,

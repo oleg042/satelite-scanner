@@ -351,6 +351,49 @@ async def cleanup_storage():
     }
 
 
+# --- Delete screenshots by type ---
+
+@api_router.post("/storage/delete-by-type")
+async def delete_screenshots_by_type(screenshot_type: str = Query(...)):
+    """Delete all screenshot files and DB records of a given type (e.g. 'final')."""
+    volume = app_settings.volume_path
+    async with async_session() as db:
+        result = await db.execute(
+            select(Screenshot).where(Screenshot.type == screenshot_type)
+        )
+        screenshots = result.scalars().all()
+        deleted_files = 0
+        deleted_bytes = 0
+        for ss in screenshots:
+            abs_path = os.path.join(volume, ss.file_path)
+            try:
+                size = os.path.getsize(abs_path)
+                os.unlink(abs_path)
+                deleted_files += 1
+                deleted_bytes += size
+            except OSError:
+                pass
+            await db.delete(ss)
+        await db.commit()
+
+    # Clean up empty directories
+    ss_path = os.path.join(volume, "screenshots")
+    if os.path.isdir(ss_path):
+        for dirpath, dirnames, filenames in os.walk(ss_path, topdown=False):
+            if not filenames and not dirnames:
+                try:
+                    os.rmdir(dirpath)
+                except OSError:
+                    pass
+
+    return {
+        "type": screenshot_type,
+        "deleted_files": deleted_files,
+        "deleted_db_records": len(screenshots),
+        "freed_mb": round(deleted_bytes / 1048576, 1),
+    }
+
+
 # --- Debug: download volume as zip (TEMPORARY) ---
 
 @api_router.get("/debug/download-volume")

@@ -2935,7 +2935,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
         S.sortField = field;
-        S.sortDir = field === 'qty' ? 'desc' : 'asc';
+        S.sortDir = (field === 'qty' || field === 'started_at') ? 'desc' : 'asc';
       }
       document.querySelectorAll('th[data-sort]').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
       th.classList.add(S.sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
