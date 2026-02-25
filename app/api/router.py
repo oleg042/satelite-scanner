@@ -216,7 +216,7 @@ def _dir_stats(path: str) -> tuple[float, int]:
 
 @api_router.get("/storage")
 async def get_storage():
-    """Return volume storage breakdown in MB."""
+    """Return volume storage breakdown in MB (with debug)."""
     volume = app_settings.volume_path
 
     tile_bytes, tile_files = _dir_stats(os.path.join(volume, "tile_cache"))
