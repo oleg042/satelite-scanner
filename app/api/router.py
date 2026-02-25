@@ -236,22 +236,46 @@ async def get_storage():
     debug["env_VOLUME_PATH"] = os.environ.get("VOLUME_PATH", "NOT SET")
     debug["env_RAILWAY_VOLUME_MOUNT_PATH"] = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "NOT SET")
     try:
-        du = subprocess.run(["du", "-sh", "-d", "1", volume], capture_output=True, text=True, timeout=30)
-        debug["du"] = du.stdout.strip().split("\n") if du.stdout else du.stderr.strip()
+        du = subprocess.run(["du", "-sh", volume], capture_output=True, text=True, timeout=30)
+        debug["du_total"] = du.stdout.strip() if du.stdout else du.stderr.strip()
     except Exception as e:
-        debug["du"] = str(e)
+        debug["du_total"] = str(e)
+    # du per subdirectory
+    try:
+        du2 = subprocess.run(["du", "-sh"] + [
+            os.path.join(volume, d) for d in os.listdir(volume) if os.path.isdir(os.path.join(volume, d))
+        ], capture_output=True, text=True, timeout=30)
+        debug["du_subdirs"] = du2.stdout.strip().split("\n") if du2.stdout else du2.stderr.strip()
+    except Exception as e:
+        debug["du_subdirs"] = str(e)
+    # Count screenshot subdirectories and their sizes
+    ss_path = os.path.join(volume, "screenshots")
+    if os.path.isdir(ss_path):
+        facility_dirs = []
+        for d in sorted(os.listdir(ss_path)):
+            dp = os.path.join(ss_path, d)
+            if os.path.isdir(dp):
+                files = os.listdir(dp)
+                size = sum(os.path.getsize(os.path.join(dp, f)) for f in files if os.path.isfile(os.path.join(dp, f)))
+                facility_dirs.append({"name": d, "files": len(files), "size_mb": round(size / 1048576, 1)})
+        debug["screenshot_facilities"] = facility_dirs
+        debug["screenshot_facility_count"] = len(facility_dirs)
     try:
         df = subprocess.run(["df", "-h"], capture_output=True, text=True, timeout=10)
         debug["df"] = df.stdout.strip().split("\n") if df.stdout else df.stderr.strip()
     except Exception as e:
         debug["df"] = str(e)
-    # List top-level dirs in both volume_path and /data
-    for p in set([volume, "/data"]):
-        k = f"ls_{p.replace('/','_').strip('_')}"
-        if os.path.isdir(p):
-            debug[k] = sorted(os.listdir(p))
-        else:
-            debug[k] = "NOT FOUND"
+    # List top-level dirs in /data
+    if os.path.isdir(volume):
+        debug["ls_data"] = sorted(os.listdir(volume))
+    # Check lost+found size
+    lf = os.path.join(volume, "lost+found")
+    if os.path.isdir(lf):
+        try:
+            lfdu = subprocess.run(["du", "-sh", lf], capture_output=True, text=True, timeout=10)
+            debug["lost_found_size"] = lfdu.stdout.strip() if lfdu.stdout else "empty or error"
+        except Exception:
+            debug["lost_found_size"] = "error"
 
     return {
         "total_mb": to_mb(total_bytes),
