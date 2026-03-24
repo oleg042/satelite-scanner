@@ -234,17 +234,19 @@ app = FastAPI(
 
 # --- Auth middleware ---
 _AUTH_EXEMPT = {"/api/login", "/api/auth/check"}
+_AUTH_EXEMPT_PREFIXES = ("/api/screenshots/",)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        # Only gate /api/ routes (skip static, root, health)
+        # Only gate /api/ routes (skip static, root, health, screenshots)
         if path.startswith("/api/") and path not in _AUTH_EXEMPT:
-            from app.auth import validate_session
-            token = request.cookies.get("session")
-            if not validate_session(token):
-                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            if not any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+                from app.auth import validate_session
+                token = request.cookies.get("session")
+                if not validate_session(token):
+                    return JSONResponse({"detail": "Not authenticated"}, status_code=401)
         return await call_next(request)
 
 
